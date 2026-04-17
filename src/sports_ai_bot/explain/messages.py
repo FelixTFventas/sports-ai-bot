@@ -21,3 +21,19 @@ def build_market_message(picks: list[Pick], market: str) -> str:
     if not filtered:
         return f"No hay picks disponibles para {market} con la confianza actual."
     return build_prediction_message(filtered)
+
+
+def build_value_message(picks: list[Pick]) -> str:
+    if not picks:
+        return "No hay value picks disponibles con el edge minimo actual."
+
+    lines = ["Value picks del dia:"]
+    for pick in picks:
+        odd = f"{pick.odd:.2f}" if pick.odd is not None else "n/d"
+        edge = f"{pick.edge:.1%}" if pick.edge is not None else "n/d"
+        ev = f"{pick.expected_value:.1%}" if pick.expected_value is not None else "n/d"
+        lines.append(
+            f"{pick.match_label} | {pick.market} | Prob {pick.probability:.0%} | Cuota {odd} | Edge {edge} | EV {ev}"
+        )
+    lines.append("Value = probabilidad del modelo por encima de la implicita de la cuota.")
+    return "\n".join(lines)

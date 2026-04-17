@@ -4,9 +4,14 @@ import argparse
 
 from sports_ai_bot.bot.telegram_bot import run_bot
 from sports_ai_bot.collect.historical import download_historical_data
-from sports_ai_bot.explain.messages import build_prediction_message
+from sports_ai_bot.evaluate.performance import (
+    build_performance_report,
+    format_performance_message,
+    settle_picks,
+)
+from sports_ai_bot.explain.messages import build_prediction_message, build_value_message
 from sports_ai_bot.features.build import build_fixture_features, build_training_dataset
-from sports_ai_bot.predict.pipeline import build_top_picks
+from sports_ai_bot.predict.pipeline import build_top_picks, build_value_picks
 from sports_ai_bot.train.train_models import train_models
 from sports_ai_bot.utils.config import get_settings
 
@@ -22,6 +27,9 @@ def main() -> None:
     subparsers.add_parser("run-bot")
     subparsers.add_parser("preview-message")
     subparsers.add_parser("check-config")
+    subparsers.add_parser("update-results")
+    subparsers.add_parser("report-performance")
+    subparsers.add_parser("preview-value")
 
     args = parser.parse_args()
 
@@ -50,6 +58,14 @@ def main() -> None:
         )
     elif args.command == "run-bot":
         run_bot()
+    elif args.command == "update-results":
+        print(settle_picks())
+    elif args.command == "report-performance":
+        report = build_performance_report()
+        print(format_performance_message(report))
+    elif args.command == "preview-value":
+        picks = build_value_picks()
+        print(build_value_message(picks))
 
 
 if __name__ == "__main__":
