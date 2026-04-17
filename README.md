@@ -1,13 +1,17 @@
 # Sports AI Bot
 
-Bot de Telegram en Python para publicar pronosticos de futbol en grupo.
+Bot de Telegram en Python para publicar picks de futbol en un grupo usando modelos estadisticos propios.
 
-## Mercados iniciales
+## Resumen
+
+El proyecto descarga historicos, construye features, entrena modelos para mercados de goles y genera mensajes listos para publicar en Telegram.
+
+Mercados soportados:
 
 - Over 2.5
-- BTTS (ambos marcan)
+- BTTS
 
-## Ligas iniciales
+Ligas incluidas:
 
 - Premier League
 - La Liga
@@ -15,13 +19,40 @@ Bot de Telegram en Python para publicar pronosticos de futbol en grupo.
 - Bundesliga
 - Ligue 1
 
-## Fuente historica inicial
+Fuentes de datos:
 
-- `football-data.co.uk`
+- Historicos: `football-data.co.uk`
+- Fixtures proximos: `ESPN scoreboard API`
 
-## Fuente inicial de fixtures proximos
+## Caracteristicas
 
-- `ESPN scoreboard API` sin clave para los proximos dias
+- Descarga automatica de historicos por liga
+- Construccion de dataset de entrenamiento
+- Generacion de features para fixtures futuros
+- Entrenamiento de modelos para `Over 2.5` y `BTTS`
+- Generacion local de mensajes para Telegram
+- Comandos interactivos del bot
+- Scheduler diario para publicacion automatica
+
+## Estructura
+
+Archivos principales:
+
+- `src/sports_ai_bot/main.py`
+- `src/sports_ai_bot/bot/telegram_bot.py`
+- `src/sports_ai_bot/collect/historical.py`
+- `src/sports_ai_bot/collect/fixtures.py`
+- `src/sports_ai_bot/features/build.py`
+- `src/sports_ai_bot/train/train_models.py`
+- `src/sports_ai_bot/predict/pipeline.py`
+- `src/sports_ai_bot/explain/messages.py`
+- `src/sports_ai_bot/utils/config.py`
+
+## Requisitos
+
+- Python `3.11+`
+- Un bot de Telegram creado con `@BotFather`
+- Un `TELEGRAM_CHAT_ID` valido para el grupo o chat destino
 
 ## Instalacion
 
@@ -32,7 +63,23 @@ pip install -e .[dev]
 copy .env.example .env
 ```
 
-## Comandos utiles
+## Configuracion
+
+Completa `C:\Users\JUNIOR\sports-ai-bot\.env` con tus valores reales:
+
+```env
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+POST_HOUR_LOCAL=09:00
+BOT_LANGUAGE=es
+```
+
+Notas:
+
+- `TELEGRAM_CHAT_ID` de grupos suele empezar por `-100`
+- `POST_HOUR_LOCAL` define la hora diaria de publicacion automatica
+
+## Comandos del proyecto
 
 Descargar historicos:
 
@@ -58,7 +105,7 @@ Entrenar modelos:
 python -m sports_ai_bot.main train
 ```
 
-Vista previa de mensaje de Telegram sin enviar:
+Vista previa del mensaje sin enviar:
 
 ```bash
 python -m sports_ai_bot.main preview-message
@@ -76,30 +123,10 @@ Ejecutar bot de Telegram:
 python -m sports_ai_bot.main run-bot
 ```
 
-## Configuracion de Telegram
-
-1. Crea el bot con `@BotFather` y copia `TELEGRAM_BOT_TOKEN`.
-2. Mete el bot en tu grupo y envia al menos un mensaje.
-3. Obtiene el `TELEGRAM_CHAT_ID` del grupo.
-4. Copia `.env.example` a `.env` y completa las variables.
-
-```env
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_CHAT_ID=-100...
-POST_HOUR_LOCAL=09:00
-BOT_LANGUAGE=es
-```
-
-5. Verifica la configuracion:
+Tests:
 
 ```bash
-python -m sports_ai_bot.main check-config
-```
-
-6. Arranca el bot:
-
-```bash
-python -m sports_ai_bot.main run-bot
+python -m pytest
 ```
 
 ## Comandos del bot
@@ -113,13 +140,44 @@ python -m sports_ai_bot.main run-bot
 - `/publishnow`
 - `/performance`
 
+## Flujo recomendado
+
+1. Ejecutar `fetch-data`
+2. Ejecutar `build-dataset`
+3. Ejecutar `train`
+4. Ejecutar `build-fixtures`
+5. Revisar `preview-message`
+6. Validar con `check-config`
+7. Ejecutar `run-bot`
+
+## Despliegue
+
+El proyecto puede ejecutarse localmente o desplegarse en una plataforma que mantenga un proceso Python activo.
+
+Para despliegue remoto, el comando principal es:
+
+```bash
+python -m sports_ai_bot.main run-bot
+```
+
+La plataforma elegida debe permitir:
+
+- Variables de entorno
+- Proceso persistente en Python
+- Acceso saliente a Internet para Telegram y fuentes de datos
+
 ## Estado actual
 
-Esta primera base deja listo:
+La base actual deja listo:
 
-- descarga de historicos por liga
-- generacion de features iniciales
-- generacion de features para fixtures futuros usando la temporada actual del mismo proveedor
-- entrenamiento de modelos para Over 2.5 y BTTS
-- mensajes locales con picks calculados
-- estructura del bot de Telegram y scheduler diario
+- pipeline de datos historicos
+- features para entrenamiento y fixtures futuros
+- modelos para `Over 2.5` y `BTTS`
+- mensajes locales para Telegram sin dependencias de IA externa
+- bot funcional con scheduler diario
+
+## Seguridad
+
+- No subas `.env` al repositorio
+- No pegues tokens de Telegram en issues o commits
+- Revoca cualquier credencial que haya sido expuesta
