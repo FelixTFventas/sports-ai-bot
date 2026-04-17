@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
     post_hour_local: str = Field(default="09:00", alias="POST_HOUR_LOCAL")
     bot_language: str = Field(default="es", alias="BOT_LANGUAGE")
+    api_football_key: str = Field(default="", alias="API_FOOTBALL_KEY")
+    api_football_base_url: str = Field(
+        default="https://v3.football.api-sports.io", alias="API_FOOTBALL_BASE_URL"
+    )
+    api_football_host: str = Field(default="", alias="API_FOOTBALL_HOST")
 
     data_dir: Path = BASE_DIR / "data"
     raw_dir: Path = data_dir / "raw"
@@ -32,6 +37,9 @@ class Settings(BaseSettings):
         if not self.telegram_chat_id:
             missing.append("TELEGRAM_CHAT_ID")
         return missing
+
+    def has_api_football(self) -> bool:
+        return bool(self.api_football_key and self.api_football_base_url)
 
 
 @lru_cache(maxsize=1)

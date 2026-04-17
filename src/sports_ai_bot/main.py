@@ -9,9 +9,13 @@ from sports_ai_bot.evaluate.performance import (
     format_performance_message,
     settle_picks,
 )
-from sports_ai_bot.explain.messages import build_prediction_message, build_value_message
+from sports_ai_bot.explain.messages import (
+    build_best_message,
+    build_prediction_message,
+    build_value_message,
+)
 from sports_ai_bot.features.build import build_fixture_features, build_training_dataset
-from sports_ai_bot.predict.pipeline import build_top_picks, build_value_picks
+from sports_ai_bot.predict.pipeline import build_best_picks, build_top_picks, build_value_picks
 from sports_ai_bot.train.train_models import train_models
 from sports_ai_bot.utils.config import get_settings
 
@@ -30,6 +34,7 @@ def main() -> None:
     subparsers.add_parser("update-results")
     subparsers.add_parser("report-performance")
     subparsers.add_parser("preview-value")
+    subparsers.add_parser("preview-best")
 
     args = parser.parse_args()
 
@@ -54,6 +59,7 @@ def main() -> None:
             {
                 "missing_bot_env": settings.missing_bot_env(),
                 "post_hour_local": settings.post_hour_local,
+                "api_football_configured": settings.has_api_football(),
             }
         )
     elif args.command == "run-bot":
@@ -66,6 +72,9 @@ def main() -> None:
     elif args.command == "preview-value":
         picks = build_value_picks()
         print(build_value_message(picks))
+    elif args.command == "preview-best":
+        picks = build_best_picks()
+        print(build_best_message(picks))
 
 
 if __name__ == "__main__":

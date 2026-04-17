@@ -30,6 +30,8 @@ class Pick:
     implied_probability: float | None = None
     edge: float | None = None
     expected_value: float | None = None
+    stake_units: int | None = None
+    rating: str | None = None
 
 
 def _confidence_label(probability: float) -> str:
@@ -131,8 +133,22 @@ def build_value_picks(limit: int = 5, min_edge: float = 0.02, min_ev: float = 0.
         and pick.edge >= min_edge
         and pick.expected_value >= min_ev
     ]
+    for pick in value_picks:
+        pick.stake_units = _stake_units(pick.edge, pick.expected_value)
+        pick.rating = _rating(pick.edge, pick.expected_value)
     value_picks.sort(key=lambda item: (item.expected_value or 0.0, item.edge or 0.0), reverse=True)
     return value_picks[:limit]
+
+
+def build_best_picks(limit: int = 5) -> list[Pick]:
+    picks = build_value_picks(limit=limit * 3)
+    for pick in picks:
+        if pick.stake_units is None:
+            pick.stake_units = _stake_units(pick.edge, pick.expected_value)
+        if pick.rating is None:
+            pick.rating = _rating(pick.edge, pick.expected_value)
+    picks.sort(key=_best_pick_score, reverse=True)
+    return picks[:limit]
 
 
 def _build_factors(row: object, market: str) -> list[str]:
@@ -173,6 +189,8 @@ def persist_picks(picks: list[Pick]) -> pd.DataFrame:
                 "expected_value": round(pick.expected_value, 4)
                 if pick.expected_value is not None
                 else None,
+                "stake_units": pick.stake_units,
+                "rating": pick.rating,
                 "factors": " | ".join(pick.factors),
                 "status": "pending",
                 "outcome": "pending",
@@ -196,6 +214,8 @@ def persist_picks(picks: list[Pick]) -> pd.DataFrame:
             "implied_probability",
             "edge",
             "expected_value",
+            "stake_units",
+            "rating",
             "factors",
             "status",
             "outcome",
@@ -267,3 +287,36 @@ def _row_value(row: object, attribute: str) -> float | None:
     if value is None or pd.isna(value):
         return None
     return float(value)
+
+
+def _stake_units(edge: float | None, expected_value: float | None) -> int | None:
+    if edge is None or expected_value is None:
+        return None
+    if edge >= 0.10 and expected_value >= 0.08:
+        return 3
+    if edge >= 0.06 and expected_value >= 0.05:
+        return 2
+    if edge >= 0.02 and expected_value >= 0.02:
+        return 1
+    return None
+
+
+def _rating(edge: float | None, expected_value: float | None) -> str | None:
+    if edge is None or expected_value is None:
+        return None
+    if edge >= 0.10 and expected_value >= 0.08:
+        return "A"
+    if edge >= 0.05 and expected_value >= 0.04:
+        return "B"
+    if edge >= 0.02 and expected_value >= 0.02:
+        return "C"
+    return None
+
+
+def _best_pick_score(pick: Pick) -> tuple[float, float, float, float]:
+    return (
+        float(pick.stake_units or 0),
+        float(pick.expected_value or 0.0),
+        float(pick.edge or 0.0),
+        float(pick.probability),
+    )

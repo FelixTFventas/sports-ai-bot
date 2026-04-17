@@ -29,11 +29,29 @@ def build_value_message(picks: list[Pick]) -> str:
 
     lines = ["Value picks del dia:"]
     for pick in picks:
+        stake = f"{pick.stake_units}u" if pick.stake_units is not None else "n/d"
+        rating = pick.rating or "n/d"
         odd = f"{pick.odd:.2f}" if pick.odd is not None else "n/d"
         edge = f"{pick.edge:.1%}" if pick.edge is not None else "n/d"
         ev = f"{pick.expected_value:.1%}" if pick.expected_value is not None else "n/d"
         lines.append(
-            f"{pick.match_label} | {pick.market} | Prob {pick.probability:.0%} | Cuota {odd} | Edge {edge} | EV {ev}"
+            f"{rating} | {stake} | {pick.match_label} | {pick.market} | Prob {pick.probability:.0%} | Cuota {odd} | Edge {edge} | EV {ev}"
         )
     lines.append("Value = probabilidad del modelo por encima de la implicita de la cuota.")
+    return "\n".join(lines)
+
+
+def build_best_message(picks: list[Pick]) -> str:
+    if not picks:
+        return "No hay best picks disponibles con el criterio premium actual."
+
+    lines = ["Best picks del dia:"]
+    for pick in picks:
+        stake = f"{pick.stake_units}u" if pick.stake_units is not None else "n/d"
+        rating = pick.rating or "n/d"
+        odd = f"{pick.odd:.2f}" if pick.odd is not None else "n/d"
+        edge = f"{pick.edge:.1%}" if pick.edge is not None else "n/d"
+        lines.append(
+            f"{rating} | {stake} | {pick.match_label} | {pick.market} | Cuota {odd} | Edge {edge}"
+        )
     return "\n".join(lines)

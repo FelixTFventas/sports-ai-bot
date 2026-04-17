@@ -24,6 +24,8 @@ PICK_COLUMNS = [
     "implied_probability",
     "edge",
     "expected_value",
+    "stake_units",
+    "rating",
     "factors",
     "status",
     "outcome",
