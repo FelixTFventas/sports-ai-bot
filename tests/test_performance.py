@@ -6,6 +6,11 @@ def test_determine_outcome_for_over25() -> None:
     assert _determine_outcome("Over 2.5", 1, 1) == "lost"
 
 
+def test_determine_outcome_for_over15() -> None:
+    assert _determine_outcome("Over 1.5", 1, 1) == "won"
+    assert _determine_outcome("Over 1.5", 1, 0) == "lost"
+
+
 def test_determine_outcome_for_btts() -> None:
     assert _determine_outcome("BTTS", 1, 1) == "won"
     assert _determine_outcome("BTTS", 2, 0) == "lost"

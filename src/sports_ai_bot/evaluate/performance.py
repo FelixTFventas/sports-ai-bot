@@ -142,6 +142,14 @@ def _load_completed_results() -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for file_path in settings.raw_dir.glob("*.csv"):
         frame = pd.read_csv(file_path)
+        frame = frame.rename(
+            columns={
+                "Home": "HomeTeam",
+                "Away": "AwayTeam",
+                "HG": "FTHG",
+                "AG": "FTAG",
+            }
+        )
         required = {"Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
         if not required.issubset(frame.columns):
             continue
@@ -222,6 +230,8 @@ def _determine_outcome(market: str, home_goals: float | None, away_goals: float 
         return "pending"
     if market == "Over 2.5":
         return "won" if float(home_goals) + float(away_goals) > 2.5 else "lost"
+    if market == "Over 1.5":
+        return "won" if float(home_goals) + float(away_goals) > 1.5 else "lost"
     if market == "BTTS":
         return "won" if float(home_goals) > 0 and float(away_goals) > 0 else "lost"
     return "pending"

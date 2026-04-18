@@ -28,6 +28,14 @@ class TeamState:
 
 def _load_raw_csv(file_path: Path) -> pd.DataFrame:
     frame = pd.read_csv(file_path)
+    frame = frame.rename(
+        columns={
+            "Home": "HomeTeam",
+            "Away": "AwayTeam",
+            "HG": "FTHG",
+            "AG": "FTAG",
+        }
+    )
     missing = [column for column in REQUIRED_COLUMNS if column not in frame.columns]
     if missing:
         raise ValueError(f"Faltan columnas requeridas en {file_path.name}: {missing}")
@@ -42,6 +50,14 @@ def _load_raw_csv(file_path: Path) -> pd.DataFrame:
 
 def _load_fixture_csv(file_path: Path) -> pd.DataFrame:
     frame = pd.read_csv(file_path)
+    frame = frame.rename(
+        columns={
+            "Home": "HomeTeam",
+            "Away": "AwayTeam",
+            "HG": "FTHG",
+            "AG": "FTAG",
+        }
+    )
     missing = [column for column in ["Date", "HomeTeam", "AwayTeam"] if column not in frame.columns]
     if missing:
         raise ValueError(f"Faltan columnas requeridas en {file_path.name}: {missing}")
@@ -168,12 +184,14 @@ def _update_team_states(
     away_points = 3 if away_goals > home_goals else 1 if home_goals == away_goals else 0
     total_goals = home_goals + away_goals
     over25 = float(total_goals > 2.5)
+    over15 = float(total_goals > 1.5)
     btts = float(home_goals > 0 and away_goals > 0)
 
     home_record = {
         "goals_for": float(home_goals),
         "goals_against": float(away_goals),
         "points": float(home_points),
+        "over15": over15,
         "over25": over25,
         "btts": btts,
     }
@@ -181,6 +199,7 @@ def _update_team_states(
         "goals_for": float(away_goals),
         "goals_against": float(home_goals),
         "points": float(away_points),
+        "over15": over15,
         "over25": over25,
         "btts": btts,
     }
@@ -222,6 +241,7 @@ def _attach_team_history_features(matches: pd.DataFrame) -> pd.DataFrame:
 
     for match in matches.sort_values("Date").itertuples(index=False):
         row = _build_feature_row(match.League, match.Date, match.HomeTeam, match.AwayTeam, states)
+        row["target_over15"] = int((match.FTHG + match.FTAG) > 1.5)
         row["target_over25"] = int((match.FTHG + match.FTAG) > 2.5)
         row["target_btts"] = int(match.FTHG > 0 and match.FTAG > 0)
         rows.append(row)

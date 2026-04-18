@@ -17,6 +17,14 @@ LEAGUE_IDS = {
     "serie_a": 135,
     "bundesliga": 78,
     "ligue_1": 61,
+    "eredivisie": 88,
+    "primeira_liga": 94,
+    "belgian_pro_league": 144,
+    "super_lig": 203,
+    "primera_division_argentina": 128,
+    "serie_a_brasil": 71,
+    "liga_mx": 262,
+    "mls": 253,
 }
 
 

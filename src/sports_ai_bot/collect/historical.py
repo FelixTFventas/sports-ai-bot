@@ -17,6 +17,14 @@ LEAGUES = {
     "I1": "serie_a",
     "D1": "bundesliga",
     "F1": "ligue_1",
+    "N1": "eredivisie",
+    "P1": "primeira_liga",
+    "B1": "belgian_pro_league",
+    "T1": "super_lig",
+    "ARG": "primera_division_argentina",
+    "BRA": "serie_a_brasil",
+    "MEX": "liga_mx",
+    "USA": "mls",
 }
 
 BASE_URL = "https://www.football-data.co.uk/mmz4281"
@@ -41,10 +49,23 @@ def training_season_codes(depth: int = 5) -> list[str]:
 
 
 def _download_csv(client: httpx.Client, season: str, league_code: str, output_file: Path) -> None:
-    url = f"{BASE_URL}/{season}/{league_code}.csv"
-    response = client.get(url, timeout=30.0)
-    response.raise_for_status()
-    output_file.write_bytes(response.content)
+    urls = [f"{BASE_URL}/{season}/{league_code}.csv"]
+    if season == current_season_code():
+        urls.append(f"https://www.football-data.co.uk/new/{league_code}.csv")
+
+    last_error: httpx.HTTPStatusError | None = None
+    for url in urls:
+        response = client.get(url, timeout=30.0)
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            last_error = exc
+            continue
+        output_file.write_bytes(response.content)
+        return
+
+    if last_error is not None:
+        raise last_error
 
 
 def download_historical_data() -> None:
@@ -57,4 +78,9 @@ def download_historical_data() -> None:
             for league_code, league_name in LEAGUES.items():
                 output_file = settings.raw_dir / f"{league_name}_{season}.csv"
                 LOGGER.info("Descargando %s %s", league_name, season)
-                _download_csv(client, season, league_code, output_file)
+                try:
+                    _download_csv(client, season, league_code, output_file)
+                except httpx.HTTPStatusError as exc:
+                    LOGGER.warning(
+                        "No disponible %s %s (%s)", league_name, season, exc.response.status_code
+                    )

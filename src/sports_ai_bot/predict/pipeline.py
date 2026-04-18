@@ -42,46 +42,66 @@ def _confidence_label(probability: float) -> str:
     return "Media"
 
 
-def build_top_picks(limit: int = 5, threshold: float = 0.65) -> list[Pick]:
+def build_top_picks(
+    limit: int = 10,
+    threshold: float = 0.60,
+    refresh_fixtures: bool = True,
+    markets: tuple[str, ...] = ("Over 2.5", "BTTS"),
+    horizon_hours: int = 48,
+) -> list[Pick]:
     settings = get_settings()
+    over15_model_file = settings.models_dir / "target_over15.joblib"
     over_model_file = settings.models_dir / "target_over25.joblib"
     btts_model_file = settings.models_dir / "target_btts.joblib"
     model_names = _model_names_by_market()
-    if not over_model_file.exists() or not btts_model_file.exists():
+    if (
+        not over15_model_file.exists()
+        or not over_model_file.exists()
+        or not btts_model_file.exists()
+    ):
         return []
 
-    fixtures_file = settings.processed_dir / "fixture_features.csv"
-    required_fixture_columns = set(FEATURE_COLUMNS + ["Date", "HomeTeam", "AwayTeam", "League"])
-    if fixtures_file.exists():
-        try:
-            latest = pd.read_csv(fixtures_file)
-        except EmptyDataError:
-            latest = build_fixture_features()
-        else:
-            if not required_fixture_columns.issubset(set(latest.columns)):
-                latest = build_fixture_features()
-    else:
-        latest = build_fixture_features()
+    latest = _load_latest_fixtures(refresh=refresh_fixtures)
 
     if latest.empty:
         return []
 
-    latest["Date"] = pd.to_datetime(latest["Date"], errors="coerce")
+    latest["Date"] = pd.to_datetime(latest["Date"], errors="coerce", utc=True)
     latest = latest.dropna(subset=FEATURE_COLUMNS + ["Date", "HomeTeam", "AwayTeam", "League"])
+    window_start = _now_utc()
+    window_end = window_start + pd.Timedelta(hours=horizon_hours)
+    latest = latest[(latest["Date"] >= window_start) & (latest["Date"] <= window_end)]
     latest = latest.sort_values("Date").head(limit * 5).copy()
     if latest.empty:
         return []
 
     latest = _attach_market_odds(latest)
 
+    over15_model = joblib.load(over15_model_file)
     over_model = joblib.load(over_model_file)
     btts_model = joblib.load(btts_model_file)
+    latest["prob_over15"] = over15_model.predict_proba(latest[FEATURE_COLUMNS])[:, 1]
     latest["prob_over25"] = over_model.predict_proba(latest[FEATURE_COLUMNS])[:, 1]
     latest["prob_btts"] = btts_model.predict_proba(latest[FEATURE_COLUMNS])[:, 1]
 
     picks: list[Pick] = []
     for row in latest.itertuples(index=False):
-        if row.prob_over25 >= threshold:
+        if "Over 1.5" in markets and row.prob_over15 >= threshold:
+            picks.append(
+                Pick(
+                    match_date=row.Date.date().isoformat(),
+                    home_team=row.HomeTeam,
+                    away_team=row.AwayTeam,
+                    match_label=f"{row.HomeTeam} vs {row.AwayTeam}",
+                    league=row.League,
+                    market="Over 1.5",
+                    probability=float(row.prob_over15),
+                    confidence=_confidence_label(float(row.prob_over15)),
+                    model_name=model_names["Over 1.5"],
+                    factors=_build_factors(row, market="over15"),
+                )
+            )
+        if "Over 2.5" in markets and row.prob_over25 >= threshold:
             picks.append(
                 Pick(
                     match_date=row.Date.date().isoformat(),
@@ -102,7 +122,7 @@ def build_top_picks(limit: int = 5, threshold: float = 0.65) -> list[Pick]:
                     factors=_build_factors(row, market="over"),
                 )
             )
-        if row.prob_btts >= threshold:
+        if "BTTS" in markets and row.prob_btts >= threshold:
             picks.append(
                 Pick(
                     match_date=row.Date.date().isoformat(),
@@ -152,8 +172,10 @@ def build_best_picks(limit: int = 5) -> list[Pick]:
 
 
 def _build_factors(row: object, market: str) -> list[str]:
-    if market == "over":
+    if market in {"over", "over15"}:
+        threshold_label = "1.5" if market == "over15" else "2.5"
         return [
+            f"Mercado objetivo: Over {threshold_label}",
             f"Local en casa anota {row.home_home_goals_for_avg_5:.2f} de media reciente",
             f"Visitante fuera anota {row.away_away_goals_for_avg_5:.2f} de media reciente",
             f"Diferencial ofensivo estimado: {row.attack_diff:+.2f}",
@@ -231,7 +253,7 @@ def persist_picks(picks: list[Pick]) -> pd.DataFrame:
 def _model_names_by_market() -> dict[str, str]:
     settings = get_settings()
     report_file = settings.reports_dir / "training_summary.json"
-    defaults = {"Over 2.5": "unknown", "BTTS": "unknown"}
+    defaults = {"Over 1.5": "unknown", "Over 2.5": "unknown", "BTTS": "unknown"}
     if not report_file.exists():
         return defaults
 
@@ -241,9 +263,52 @@ def _model_names_by_market() -> dict[str, str]:
         return defaults
 
     return {
+        "Over 1.5": summary.get("target_over15", {}).get("selected_model", "unknown"),
         "Over 2.5": summary.get("target_over25", {}).get("selected_model", "unknown"),
         "BTTS": summary.get("target_btts", {}).get("selected_model", "unknown"),
     }
+
+
+def _load_latest_fixtures(refresh: bool = False) -> pd.DataFrame:
+    settings = get_settings()
+    fixtures_file = settings.processed_dir / "fixture_features.csv"
+    required_fixture_columns = set(FEATURE_COLUMNS + ["Date", "HomeTeam", "AwayTeam", "League"])
+    if refresh:
+        return build_fixture_features()
+
+    if fixtures_file.exists():
+        try:
+            cached = pd.read_csv(fixtures_file)
+        except EmptyDataError:
+            cached = pd.DataFrame()
+        else:
+            if required_fixture_columns.issubset(set(cached.columns)):
+                cached["Date"] = pd.to_datetime(cached["Date"], errors="coerce", utc=True)
+                cached = cached.dropna(subset=["Date"])
+                if not cached.empty and (cached["Date"] >= _now_utc()).any():
+                    return cached
+
+    return build_fixture_features()
+
+
+def _now_utc() -> pd.Timestamp:
+    return pd.Timestamp.now(tz="UTC")
+
+
+def build_market_picks(
+    market: str,
+    limit: int = 10,
+    threshold: float = 0.60,
+    refresh_fixtures: bool = True,
+    horizon_hours: int = 48,
+) -> list[Pick]:
+    return build_top_picks(
+        limit=limit,
+        threshold=threshold,
+        refresh_fixtures=refresh_fixtures,
+        markets=(market,),
+        horizon_hours=horizon_hours,
+    )
 
 
 def _attach_market_odds(fixtures: pd.DataFrame) -> pd.DataFrame:

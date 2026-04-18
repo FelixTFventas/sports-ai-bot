@@ -11,11 +11,17 @@ from sports_ai_bot.evaluate.performance import (
 )
 from sports_ai_bot.explain.messages import (
     build_best_message,
+    build_market_message,
     build_prediction_message,
     build_value_message,
 )
 from sports_ai_bot.features.build import build_fixture_features, build_training_dataset
-from sports_ai_bot.predict.pipeline import build_best_picks, build_top_picks, build_value_picks
+from sports_ai_bot.predict.pipeline import (
+    build_best_picks,
+    build_market_picks,
+    build_top_picks,
+    build_value_picks,
+)
 from sports_ai_bot.train.train_models import train_models
 from sports_ai_bot.utils.config import get_settings
 
@@ -30,6 +36,7 @@ def main() -> None:
     subparsers.add_parser("train")
     subparsers.add_parser("run-bot")
     subparsers.add_parser("preview-message")
+    subparsers.add_parser("preview-over15")
     subparsers.add_parser("check-config")
     subparsers.add_parser("update-results")
     subparsers.add_parser("report-performance")
@@ -53,6 +60,9 @@ def main() -> None:
         picks = build_top_picks()
         message = build_prediction_message(picks)
         print(message)
+    elif args.command == "preview-over15":
+        picks = build_market_picks("Over 1.5", limit=10, threshold=0.65)
+        print(build_market_message(picks, "Over 1.5"))
     elif args.command == "check-config":
         settings = get_settings()
         print(

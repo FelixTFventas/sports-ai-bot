@@ -132,6 +132,14 @@ def _load_csv_market_odds() -> pd.DataFrame:
     for league_name in LEAGUES.values():
         for file_path in sorted(settings.raw_dir.glob(f"{league_name}_*.csv")):
             frame = pd.read_csv(file_path)
+            frame = frame.rename(
+                columns={
+                    "Home": "HomeTeam",
+                    "Away": "AwayTeam",
+                    "HG": "FTHG",
+                    "AG": "FTAG",
+                }
+            )
             required = {"Date", "HomeTeam", "AwayTeam"}
             if not required.issubset(frame.columns):
                 continue

@@ -23,6 +23,14 @@ LEAGUE_FEEDS = {
     "serie_a": "ita.1",
     "bundesliga": "ger.1",
     "ligue_1": "fra.1",
+    "eredivisie": "ned.1",
+    "primeira_liga": "por.1",
+    "belgian_pro_league": "bel.1",
+    "super_lig": "tur.1",
+    "primera_division_argentina": "arg.1",
+    "serie_a_brasil": "bra.1",
+    "liga_mx": "mex.1",
+    "mls": "usa.1",
 }
 
 
