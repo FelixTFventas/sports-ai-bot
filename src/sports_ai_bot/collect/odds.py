@@ -5,11 +5,10 @@ from datetime import datetime, timedelta
 import httpx
 import pandas as pd
 
-from sports_ai_bot.collect.api_football import (
-    ApiFootballError,
-    get_json,
+from sports_ai_bot.collect.the_odds_api import (
+    TheOddsApiError,
+    get_odds_for_league,
     is_configured,
-    league_context,
 )
 from sports_ai_bot.utils.logging import get_logger
 from sports_ai_bot.collect.fixtures import LEAGUE_FEEDS
@@ -22,16 +21,16 @@ LOGGER = get_logger(__name__)
 
 
 def load_upcoming_market_odds() -> pd.DataFrame:
-    api_football_odds = pd.DataFrame()
+    the_odds_api_odds = pd.DataFrame()
     if is_configured():
         try:
-            api_football_odds = _fetch_api_football_market_odds(days_ahead=7)
-        except (ApiFootballError, httpx.HTTPError, RuntimeError, ValueError) as exc:
-            api_football_odds = pd.DataFrame()
-            LOGGER.warning("API-Football odds fallback to ESPN/CSV: %s", exc)
+            the_odds_api_odds = _fetch_the_odds_api_market_odds(days_ahead=7)
+        except (TheOddsApiError, httpx.HTTPError, RuntimeError, ValueError) as exc:
+            the_odds_api_odds = pd.DataFrame()
+            LOGGER.warning("The Odds API odds fallback to ESPN/CSV: %s", exc)
     espn_odds = _fetch_espn_market_odds(days_ahead=7)
     csv_odds = _load_csv_market_odds()
-    combined = pd.concat([api_football_odds, espn_odds, csv_odds], ignore_index=True)
+    combined = pd.concat([the_odds_api_odds, espn_odds, csv_odds], ignore_index=True)
     if combined.empty:
         return pd.DataFrame(columns=["match_day", "League", "HomeTeam", "AwayTeam", "odd_over25"])
     return combined.drop_duplicates(
@@ -39,14 +38,11 @@ def load_upcoming_market_odds() -> pd.DataFrame:
     )
 
 
-def _fetch_api_football_market_odds(days_ahead: int = 7) -> pd.DataFrame:
+def _fetch_the_odds_api_market_odds(days_ahead: int = 7) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
-    today = datetime.today().date()
 
     for league_name in LEAGUE_FEEDS:
-        for offset in range(days_ahead + 1):
-            target_day = today + timedelta(days=offset)
-            rows.extend(_fetch_api_football_league_odds(league_name, target_day))
+        rows.extend(_fetch_the_odds_api_league_odds(league_name, days_ahead))
 
     if not rows:
         return pd.DataFrame(columns=["match_day", "League", "HomeTeam", "AwayTeam", "odd_over25"])
@@ -57,33 +53,20 @@ def _fetch_api_football_market_odds(days_ahead: int = 7) -> pd.DataFrame:
     )
 
 
-def _fetch_api_football_league_odds(league_name: str, target_day) -> list[dict[str, object]]:
-    context = league_context(league_name, target_day)
-    payload = get_json(
-        "/odds",
-        {
-            "league": context.league_id,
-            "season": context.season_year,
-            "date": target_day.isoformat(),
-            "timezone": "UTC",
-            "bookmaker": 6,
-        },
-    )
-
+def _fetch_the_odds_api_league_odds(league_name: str, days_ahead: int) -> list[dict[str, object]]:
+    payload = get_odds_for_league(league_name, markets="totals", days_ahead=days_ahead)
     rows: list[dict[str, object]] = []
-    for item in payload.get("response", []):
-        fixture = item.get("fixture", {})
-        teams = item.get("teams", {})
-        home_name = teams.get("home", {}).get("name", "")
-        away_name = teams.get("away", {}).get("name", "")
+    for item in payload:
+        home_name = str(item.get("home_team") or "")
+        away_name = str(item.get("away_team") or "")
         if not home_name or not away_name:
             continue
 
-        odd_over25 = _extract_api_football_over25(item.get("bookmakers", []))
+        odd_over25 = _extract_the_odds_totals_price(item.get("bookmakers", []), point=2.5)
         if odd_over25 is None:
             continue
 
-        match_day = pd.to_datetime(fixture.get("date"), errors="coerce")
+        match_day = pd.to_datetime(item.get("commence_time"), errors="coerce")
         if pd.isna(match_day):
             continue
 
@@ -96,6 +79,8 @@ def _fetch_api_football_league_odds(league_name: str, target_day) -> list[dict[s
                 "odd_over25": odd_over25,
             }
         )
+    if rows:
+        LOGGER.info("Odds The Odds API %s: %s", league_name, len(rows))
     return rows
 
 
@@ -228,17 +213,25 @@ def _extract_over25_decimal(odds_payload: list[dict[str, object]]) -> float | No
     return None
 
 
-def _extract_api_football_over25(bookmakers: list[dict[str, object]]) -> float | None:
+def _extract_the_odds_totals_price(
+    bookmakers: list[dict[str, object]], point: float
+) -> float | None:
     for bookmaker in bookmakers:
-        bets = bookmaker.get("bets", [])
-        for bet in bets:
-            if bet.get("name") not in {"Goals Over/Under", "Over/Under"}:
+        markets = bookmaker.get("markets", [])
+        for market in markets:
+            if market.get("key") != "totals":
                 continue
-            for value in bet.get("values", []):
-                if value.get("value") in {"Over 2.5", "Over 2.5 Goals"}:
-                    odd = pd.to_numeric(value.get("odd"), errors="coerce")
-                    if pd.notna(odd):
-                        return float(odd)
+            for outcome in market.get("outcomes", []):
+                if str(outcome.get("name", "")).lower() != "over":
+                    continue
+                outcome_point = pd.to_numeric(outcome.get("point"), errors="coerce")
+                outcome_price = pd.to_numeric(outcome.get("price"), errors="coerce")
+                if (
+                    pd.notna(outcome_point)
+                    and pd.notna(outcome_price)
+                    and float(outcome_point) == point
+                ):
+                    return float(outcome_price)
     return None
 
 

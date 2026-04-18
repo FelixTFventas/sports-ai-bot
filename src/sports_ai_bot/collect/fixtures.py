@@ -5,11 +5,10 @@ from datetime import datetime, timedelta
 import httpx
 import pandas as pd
 
-from sports_ai_bot.collect.api_football import (
-    ApiFootballError,
-    get_json,
+from sports_ai_bot.collect.the_odds_api import (
+    TheOddsApiError,
+    get_events_for_league,
     is_configured,
-    league_context,
 )
 from sports_ai_bot.utils.team_names import canonical_team_name
 from sports_ai_bot.utils.logging import get_logger
@@ -38,9 +37,9 @@ def fetch_upcoming_fixtures(days_ahead: int = 7) -> pd.DataFrame:
     rows: list[dict[str, str]] = []
     if is_configured():
         try:
-            rows = _fetch_api_football_fixtures(days_ahead)
-        except (ApiFootballError, httpx.HTTPError, RuntimeError, ValueError) as exc:
-            LOGGER.warning("API-Football fixtures fallback to ESPN: %s", exc)
+            rows = _fetch_the_odds_api_fixtures(days_ahead)
+        except (TheOddsApiError, httpx.HTTPError, RuntimeError, ValueError) as exc:
+            LOGGER.warning("The Odds API fixtures fallback to ESPN: %s", exc)
     if not rows:
         rows = _fetch_espn_fixtures(days_ahead)
 
@@ -53,55 +52,36 @@ def fetch_upcoming_fixtures(days_ahead: int = 7) -> pd.DataFrame:
     return fixtures
 
 
-def _fetch_api_football_fixtures(days_ahead: int) -> list[dict[str, str]]:
+def _fetch_the_odds_api_fixtures(days_ahead: int) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
-    today = datetime.today().date()
 
     for league_name in LEAGUE_FEEDS:
-        for offset in range(days_ahead + 1):
-            target_day = today + timedelta(days=offset)
-            rows.extend(_fetch_api_football_league_day(league_name, target_day))
+        rows.extend(_fetch_the_odds_api_league_events(league_name, days_ahead))
 
     return rows
 
 
-def _fetch_api_football_league_day(league_name: str, target_day) -> list[dict[str, str]]:
-    context = league_context(league_name, target_day)
-    payload = get_json(
-        "/fixtures",
-        {
-            "league": context.league_id,
-            "season": context.season_year,
-            "date": target_day.isoformat(),
-            "timezone": "UTC",
-        },
-    )
-
+def _fetch_the_odds_api_league_events(league_name: str, days_ahead: int) -> list[dict[str, str]]:
+    payload = get_events_for_league(league_name, days_ahead=days_ahead)
     rows: list[dict[str, str]] = []
-    for item in payload.get("response", []):
-        fixture = item.get("fixture", {})
-        status = fixture.get("status", {})
-        if status.get("short") in {"FT", "AET", "PEN", "CANC", "PST", "ABD"}:
-            continue
-
-        teams = item.get("teams", {})
-        home_name = teams.get("home", {}).get("name", "")
-        away_name = teams.get("away", {}).get("name", "")
+    for item in payload:
+        home_name = str(item.get("home_team") or "")
+        away_name = str(item.get("away_team") or "")
         if not home_name or not away_name:
             continue
 
         rows.append(
             {
-                "Date": fixture.get("date", ""),
+                "Date": str(item.get("commence_time") or ""),
                 "League": league_name,
                 "HomeTeam": canonical_team_name(league_name, home_name) or home_name,
                 "AwayTeam": canonical_team_name(league_name, away_name) or away_name,
-                "Status": status.get("long", status.get("short", "")),
+                "Status": "scheduled",
             }
         )
 
     if rows:
-        LOGGER.info("Fixtures API-Football %s %s: %s", league_name, target_day, len(rows))
+        LOGGER.info("Fixtures The Odds API %s: %s", league_name, len(rows))
     return rows
 
 

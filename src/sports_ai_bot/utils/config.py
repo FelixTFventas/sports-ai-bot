@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
     post_hour_local: str = Field(default="09:00", alias="POST_HOUR_LOCAL")
     bot_language: str = Field(default="es", alias="BOT_LANGUAGE")
+    the_odds_api_key: str = Field(default="", alias="THE_ODDS_API_KEY")
+    the_odds_api_base_url: str = Field(
+        default="https://api.the-odds-api.com/v4", alias="THE_ODDS_API_BASE_URL"
+    )
+    the_odds_api_region: str = Field(default="eu", alias="THE_ODDS_API_REGION")
+    the_odds_api_bookmaker: str = Field(default="bet365", alias="THE_ODDS_API_BOOKMAKER")
     api_football_key: str = Field(default="", alias="API_FOOTBALL_KEY")
     api_football_base_url: str = Field(
         default="https://v3.football.api-sports.io", alias="API_FOOTBALL_BASE_URL"
@@ -40,6 +46,9 @@ class Settings(BaseSettings):
 
     def has_api_football(self) -> bool:
         return bool(self.api_football_key and self.api_football_base_url)
+
+    def has_the_odds_api(self) -> bool:
+        return bool(self.the_odds_api_key and self.the_odds_api_base_url)
 
 
 @lru_cache(maxsize=1)

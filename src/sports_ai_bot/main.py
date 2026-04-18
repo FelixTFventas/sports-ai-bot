@@ -69,6 +69,7 @@ def main() -> None:
             {
                 "missing_bot_env": settings.missing_bot_env(),
                 "post_hour_local": settings.post_hour_local,
+                "the_odds_api_configured": settings.has_the_odds_api(),
                 "api_football_configured": settings.has_api_football(),
             }
         )
