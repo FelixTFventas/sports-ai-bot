@@ -70,6 +70,9 @@ def build_performance_report() -> dict[str, object]:
                 "wins": 0,
                 "losses": 0,
                 "hit_rate": 0.0,
+                "total_profit": 0.0,
+                "roi": 0.0,
+                "yield": 0.0,
             },
             "by_market": {},
             "by_league": {},
@@ -100,7 +103,8 @@ def format_performance_message(report: dict[str, object]) -> str:
         "Rendimiento historico:",
         (
             f"Total: {summary['total']} | Settled: {summary['settled']} | Pending: {summary['pending']} | "
-            f"Wins: {summary['wins']} | Losses: {summary['losses']} | Hit rate: {summary['hit_rate']:.1%}"
+            f"Wins: {summary['wins']} | Losses: {summary['losses']} | Hit rate: {summary['hit_rate']:.1%} | "
+            f"Profit: {summary['total_profit']:+.2f}u | ROI: {summary['roi']:.1%} | Yield: {summary['yield']:.1%}"
         ),
     ]
 
@@ -232,6 +236,8 @@ def _determine_outcome(market: str, home_goals: float | None, away_goals: float 
         return "won" if float(home_goals) + float(away_goals) > 2.5 else "lost"
     if market == "Over 1.5":
         return "won" if float(home_goals) + float(away_goals) > 1.5 else "lost"
+    if market == "Under 4.5":
+        return "won" if float(home_goals) + float(away_goals) < 4.5 else "lost"
     if market == "BTTS":
         return "won" if float(home_goals) > 0 and float(away_goals) > 0 else "lost"
     return "pending"
@@ -253,6 +259,8 @@ def _summarize_frame(frame: pd.DataFrame) -> dict[str, object]:
     wins = int((settled["outcome"] == "won").sum())
     losses = int((settled["outcome"] == "lost").sum())
     total_settled = wins + losses
+    total_profit = round(float(settled.apply(_profit_units, axis=1).sum()), 4) if not settled.empty else 0.0
+    risked_units = float(total_settled)
     return {
         "total": int(len(frame)),
         "settled": total_settled,
@@ -260,7 +268,20 @@ def _summarize_frame(frame: pd.DataFrame) -> dict[str, object]:
         "wins": wins,
         "losses": losses,
         "hit_rate": round(wins / total_settled, 4) if total_settled else 0.0,
+        "total_profit": total_profit,
+        "roi": round(total_profit / risked_units, 4) if risked_units else 0.0,
+        "yield": round(total_profit / risked_units, 4) if risked_units else 0.0,
     }
+
+
+def _profit_units(row: pd.Series) -> float:
+    outcome = row.get("outcome")
+    odd = pd.to_numeric(row.get("odd"), errors="coerce")
+    if outcome == "won":
+        return float(odd - 1.0) if pd.notna(odd) and float(odd) > 1.0 else 1.0
+    if outcome == "lost":
+        return -1.0
+    return 0.0
 
 
 def _group_summary(frame: pd.DataFrame, column: str) -> dict[str, dict[str, object]]:

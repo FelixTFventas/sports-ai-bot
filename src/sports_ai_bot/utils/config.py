@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     )
     the_odds_api_region: str = Field(default="eu", alias="THE_ODDS_API_REGION")
     the_odds_api_bookmaker: str = Field(default="bet365", alias="THE_ODDS_API_BOOKMAKER")
+    the_odds_api_extra_bookmakers: str = Field(
+        default="pinnacle", alias="THE_ODDS_API_EXTRA_BOOKMAKERS"
+    )
+    corners_pick_selection: str = Field(default="Over", alias="CORNERS_PICK_SELECTION")
+    corners_pick_point: float = Field(default=9.5, alias="CORNERS_PICK_POINT")
+    corners_pick_min_price: float = Field(default=1.65, alias="CORNERS_PICK_MIN_PRICE")
+    corners_pick_max_price: float = Field(default=2.15, alias="CORNERS_PICK_MAX_PRICE")
     api_football_key: str = Field(default="", alias="API_FOOTBALL_KEY")
     api_football_base_url: str = Field(
         default="https://v3.football.api-sports.io", alias="API_FOOTBALL_BASE_URL"
@@ -49,6 +56,21 @@ class Settings(BaseSettings):
 
     def has_the_odds_api(self) -> bool:
         return bool(self.the_odds_api_key and self.the_odds_api_base_url)
+
+    def the_odds_api_bookmakers_list(self) -> list[str]:
+        bookmakers: list[str] = []
+        for value in [self.the_odds_api_bookmaker, self.the_odds_api_extra_bookmakers]:
+            for bookmaker in value.split(","):
+                normalized = bookmaker.strip()
+                if normalized and normalized not in bookmakers:
+                    bookmakers.append(normalized)
+        return bookmakers
+
+    def the_odds_api_bookmakers_query(self) -> str:
+        return ",".join(self.the_odds_api_bookmakers_list())
+
+    def corners_pick_market_label(self) -> str:
+        return f"{self.corners_pick_selection} {self.corners_pick_point:g} Corners"
 
 
 @lru_cache(maxsize=1)

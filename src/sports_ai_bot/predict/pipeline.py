@@ -48,10 +48,12 @@ def build_top_picks(
     refresh_fixtures: bool = True,
     markets: tuple[str, ...] = ("Over 2.5", "BTTS"),
     horizon_hours: int = 48,
+    include_odds: bool = False,
 ) -> list[Pick]:
     settings = get_settings()
     over15_model_file = settings.models_dir / "target_over15.joblib"
     over_model_file = settings.models_dir / "target_over25.joblib"
+    under45_model_file = settings.models_dir / "target_under45.joblib"
     btts_model_file = settings.models_dir / "target_btts.joblib"
     model_names = _model_names_by_market()
     if (
@@ -75,13 +77,18 @@ def build_top_picks(
     if latest.empty:
         return []
 
-    latest = _attach_market_odds(latest)
+    if include_odds:
+        latest = _attach_market_odds(latest)
 
     over15_model = joblib.load(over15_model_file)
     over_model = joblib.load(over_model_file)
     btts_model = joblib.load(btts_model_file)
+    under45_model = joblib.load(under45_model_file) if under45_model_file.exists() else None
     latest["prob_over15"] = over15_model.predict_proba(latest[FEATURE_COLUMNS])[:, 1]
     latest["prob_over25"] = over_model.predict_proba(latest[FEATURE_COLUMNS])[:, 1]
+    latest["prob_under45"] = (
+        under45_model.predict_proba(latest[FEATURE_COLUMNS])[:, 1] if under45_model is not None else None
+    )
     latest["prob_btts"] = btts_model.predict_proba(latest[FEATURE_COLUMNS])[:, 1]
 
     picks: list[Pick] = []
@@ -122,6 +129,25 @@ def build_top_picks(
                     factors=_build_factors(row, market="over"),
                 )
             )
+        if (
+            "Under 4.5" in markets
+            and row.prob_under45 is not None
+            and float(row.prob_under45) >= threshold
+        ):
+            picks.append(
+                Pick(
+                    match_date=row.Date.date().isoformat(),
+                    home_team=row.HomeTeam,
+                    away_team=row.AwayTeam,
+                    match_label=f"{row.HomeTeam} vs {row.AwayTeam}",
+                    league=row.League,
+                    market="Under 4.5",
+                    probability=float(row.prob_under45),
+                    confidence=_confidence_label(float(row.prob_under45)),
+                    model_name=model_names["Under 4.5"],
+                    factors=_build_factors(row, market="under45"),
+                )
+            )
         if "BTTS" in markets and row.prob_btts >= threshold:
             picks.append(
                 Pick(
@@ -143,7 +169,7 @@ def build_top_picks(
 
 
 def build_value_picks(limit: int = 5, min_edge: float = 0.02, min_ev: float = 0.02) -> list[Pick]:
-    picks = build_top_picks(limit=limit * 4, threshold=0.6)
+    picks = build_top_picks(limit=limit * 4, threshold=0.6, include_odds=True)
     value_picks = [
         pick
         for pick in picks
@@ -179,6 +205,13 @@ def _build_factors(row: object, market: str) -> list[str]:
             f"Local en casa anota {row.home_home_goals_for_avg_5:.2f} de media reciente",
             f"Visitante fuera anota {row.away_away_goals_for_avg_5:.2f} de media reciente",
             f"Diferencial ofensivo estimado: {row.attack_diff:+.2f}",
+        ]
+    if market == "under45":
+        return [
+            "Mercado objetivo: Under 4.5",
+            f"Local concede {row.home_goals_against_avg_5:.2f} goles de media reciente",
+            f"Visitante concede {row.away_goals_against_avg_5:.2f} goles de media reciente",
+            f"Balance de gol estimado: {row.goal_balance_diff:+.2f}",
         ]
     return [
         f"Local llega con {row.home_btts_rate_5:.0%} de BTTS en sus ultimos 5",
@@ -253,7 +286,12 @@ def persist_picks(picks: list[Pick]) -> pd.DataFrame:
 def _model_names_by_market() -> dict[str, str]:
     settings = get_settings()
     report_file = settings.reports_dir / "training_summary.json"
-    defaults = {"Over 1.5": "unknown", "Over 2.5": "unknown", "BTTS": "unknown"}
+    defaults = {
+        "Over 1.5": "unknown",
+        "Over 2.5": "unknown",
+        "Under 4.5": "unknown",
+        "BTTS": "unknown",
+    }
     if not report_file.exists():
         return defaults
 
@@ -265,6 +303,7 @@ def _model_names_by_market() -> dict[str, str]:
     return {
         "Over 1.5": summary.get("target_over15", {}).get("selected_model", "unknown"),
         "Over 2.5": summary.get("target_over25", {}).get("selected_model", "unknown"),
+        "Under 4.5": summary.get("target_under45", {}).get("selected_model", "unknown"),
         "BTTS": summary.get("target_btts", {}).get("selected_model", "unknown"),
     }
 

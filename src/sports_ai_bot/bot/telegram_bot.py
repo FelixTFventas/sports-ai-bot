@@ -10,6 +10,7 @@ from sports_ai_bot.explain.messages import (
     build_prediction_message,
     build_value_message,
 )
+from sports_ai_bot.research.corners import build_corners_picks
 from sports_ai_bot.predict.pipeline import (
     build_best_picks,
     build_market_picks,
@@ -26,17 +27,19 @@ def _safe_message(message: str) -> str:
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Bot listo. Usa /today, /over15, /over, /btts, /top, /publishnow o /help."
+        "Bot listo. Usa /today, /over15, /over, /btts, /corners, /top, /publishnow o /help."
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = get_settings()
     await update.message.reply_text(
         "Comandos disponibles:\n"
         "/today - picks del dia\n"
         "/over15 - picks Over 1.5\n"
         "/over - picks Over 2.5\n"
         "/btts - picks Ambos marcan\n"
+        f"/corners - picks experimentales {settings.corners_pick_market_label()}\n"
         "/top - mejores picks disponibles\n"
         "/value - value picks con edge positivo\n"
         "/best - picks premium mas fuertes\n"
@@ -66,6 +69,26 @@ async def over15_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def btts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     picks = build_market_picks("BTTS", limit=10, threshold=0.60)
     message = build_market_message(picks, "BTTS")
+    await update.message.reply_text(_safe_message(message))
+
+
+async def under45_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    picks = build_market_picks("Under 4.5", limit=10, threshold=0.72)
+    message = build_market_message(picks, "Under 4.5")
+    await update.message.reply_text(_safe_message(message))
+
+
+async def corners_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = get_settings()
+    picks = build_corners_picks(
+        limit=6,
+        days_ahead=2,
+        limit_per_league=2,
+        target_point=settings.corners_pick_point,
+        selection=settings.corners_pick_selection,
+    )
+    persist_picks(picks)
+    message = build_market_message(picks, settings.corners_pick_market_label())
     await update.message.reply_text(_safe_message(message))
 
 
@@ -99,7 +122,7 @@ async def publishnow_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def publish_daily_picks(context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = get_settings()
-    picks = build_top_picks(refresh_fixtures=True)
+    picks = build_top_picks(refresh_fixtures=False)
     persist_picks(picks)
     message = build_prediction_message(picks)
     await context.bot.send_message(chat_id=settings.telegram_chat_id, text=_safe_message(message))
@@ -122,7 +145,9 @@ def _build_application() -> Application:
     application.add_handler(CommandHandler("today", today_command))
     application.add_handler(CommandHandler("over15", over15_command))
     application.add_handler(CommandHandler("over", over_command))
+    application.add_handler(CommandHandler("under45", under45_command))
     application.add_handler(CommandHandler("btts", btts_command))
+    application.add_handler(CommandHandler("corners", corners_command))
     application.add_handler(CommandHandler("top", top_command))
     application.add_handler(CommandHandler("value", value_command))
     application.add_handler(CommandHandler("best", best_command))

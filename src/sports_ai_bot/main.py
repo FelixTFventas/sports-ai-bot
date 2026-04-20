@@ -15,6 +15,15 @@ from sports_ai_bot.explain.messages import (
     build_prediction_message,
     build_value_message,
 )
+from sports_ai_bot.research.corners import (
+    build_corners_picks,
+    build_corners_odds_preview,
+    build_corners_research_report,
+    build_target_corners_odds_preview,
+    format_corners_odds_preview,
+    format_corners_research_report,
+    format_target_corners_odds_preview,
+)
 from sports_ai_bot.features.build import build_fixture_features, build_training_dataset
 from sports_ai_bot.predict.pipeline import (
     build_best_picks,
@@ -37,6 +46,12 @@ def main() -> None:
     subparsers.add_parser("run-bot")
     subparsers.add_parser("preview-message")
     subparsers.add_parser("preview-over15")
+    subparsers.add_parser("preview-under45")
+    subparsers.add_parser("preview-corners-odds")
+    subparsers.add_parser("preview-corners")
+    subparsers.add_parser("preview-corners-picks")
+    subparsers.add_parser("save-corners-picks")
+    subparsers.add_parser("research-corners")
     subparsers.add_parser("check-config")
     subparsers.add_parser("update-results")
     subparsers.add_parser("report-performance")
@@ -63,6 +78,47 @@ def main() -> None:
     elif args.command == "preview-over15":
         picks = build_market_picks("Over 1.5", limit=10, threshold=0.65)
         print(build_market_message(picks, "Over 1.5"))
+    elif args.command == "preview-under45":
+        picks = build_market_picks("Under 4.5", limit=10, threshold=0.72)
+        print(build_market_message(picks, "Under 4.5"))
+    elif args.command == "preview-corners-odds":
+        report = build_corners_odds_preview(days_ahead=2, limit_per_league=3)
+        print(format_corners_odds_preview(report))
+    elif args.command == "preview-corners":
+        settings = get_settings()
+        report = build_target_corners_odds_preview(
+            days_ahead=2,
+            limit_per_league=3,
+            target_point=settings.corners_pick_point,
+            selection=settings.corners_pick_selection,
+        )
+        print(format_target_corners_odds_preview(report))
+    elif args.command == "preview-corners-picks":
+        settings = get_settings()
+        picks = build_corners_picks(
+            limit=6,
+            days_ahead=2,
+            limit_per_league=2,
+            target_point=settings.corners_pick_point,
+            selection=settings.corners_pick_selection,
+        )
+        print(build_market_message(picks, settings.corners_pick_market_label()))
+    elif args.command == "save-corners-picks":
+        settings = get_settings()
+        picks = build_corners_picks(
+            limit=6,
+            days_ahead=2,
+            limit_per_league=2,
+            target_point=settings.corners_pick_point,
+            selection=settings.corners_pick_selection,
+        )
+        from sports_ai_bot.predict.pipeline import persist_picks
+
+        persist_picks(picks)
+        print(build_market_message(picks, settings.corners_pick_market_label()))
+    elif args.command == "research-corners":
+        report = build_corners_research_report(days_ahead=2)
+        print(format_corners_research_report(report))
     elif args.command == "check-config":
         settings = get_settings()
         print(
@@ -70,6 +126,11 @@ def main() -> None:
                 "missing_bot_env": settings.missing_bot_env(),
                 "post_hour_local": settings.post_hour_local,
                 "the_odds_api_configured": settings.has_the_odds_api(),
+                "the_odds_api_bookmakers": settings.the_odds_api_bookmakers_list(),
+                "corners_pick_selection": settings.corners_pick_selection,
+                "corners_pick_point": settings.corners_pick_point,
+                "corners_pick_min_price": settings.corners_pick_min_price,
+                "corners_pick_max_price": settings.corners_pick_max_price,
                 "api_football_configured": settings.has_api_football(),
             }
         )

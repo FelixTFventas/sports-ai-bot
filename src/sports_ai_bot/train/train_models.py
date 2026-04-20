@@ -133,6 +133,7 @@ def train_models() -> dict[str, dict[str, object]]:
     summary = {
         "target_over15": _train_single_target(frame, "target_over15"),
         "target_over25": _train_single_target(frame, "target_over25"),
+        "target_under45": _train_single_target(frame, "target_under45"),
         "target_btts": _train_single_target(frame, "target_btts"),
     }
 

@@ -21,21 +21,29 @@ LOGGER = get_logger(__name__)
 
 
 def load_upcoming_market_odds() -> pd.DataFrame:
-    the_odds_api_odds = pd.DataFrame()
     if is_configured():
         try:
             the_odds_api_odds = _fetch_the_odds_api_market_odds(days_ahead=7)
+            if not the_odds_api_odds.empty:
+                LOGGER.info("Odds source=the_odds count=%s", len(the_odds_api_odds))
+                return the_odds_api_odds
+            LOGGER.info("Odds source=the_odds count=0 fallback=espn_csv")
         except (TheOddsApiError, httpx.HTTPError, RuntimeError, ValueError) as exc:
-            the_odds_api_odds = pd.DataFrame()
             LOGGER.warning("The Odds API odds fallback to ESPN/CSV: %s", exc)
+    else:
+        LOGGER.info("Odds source=the_odds disabled fallback=espn_csv")
+
     espn_odds = _fetch_espn_market_odds(days_ahead=7)
+    if not espn_odds.empty:
+        LOGGER.info("Odds source=espn count=%s", len(espn_odds))
+        return espn_odds
+
     csv_odds = _load_csv_market_odds()
-    combined = pd.concat([the_odds_api_odds, espn_odds, csv_odds], ignore_index=True)
-    if combined.empty:
-        return pd.DataFrame(columns=["match_day", "League", "HomeTeam", "AwayTeam", "odd_over25"])
-    return combined.drop_duplicates(
-        subset=["match_day", "League", "HomeTeam", "AwayTeam"], keep="first"
-    )
+    if not csv_odds.empty:
+        LOGGER.info("Odds source=csv count=%s", len(csv_odds))
+        return csv_odds
+
+    return pd.DataFrame(columns=["match_day", "League", "HomeTeam", "AwayTeam", "odd_over25"])
 
 
 def _fetch_the_odds_api_market_odds(days_ahead: int = 7) -> pd.DataFrame:

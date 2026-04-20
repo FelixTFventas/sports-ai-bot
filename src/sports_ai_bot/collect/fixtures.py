@@ -34,15 +34,24 @@ LEAGUE_FEEDS = {
 
 
 def fetch_upcoming_fixtures(days_ahead: int = 7) -> pd.DataFrame:
-    rows: list[dict[str, str]] = []
     if is_configured():
         try:
             rows = _fetch_the_odds_api_fixtures(days_ahead)
+            if rows:
+                LOGGER.info("Fixtures source=the_odds count=%s", len(rows))
+                return _finalize_fixtures(rows)
+            LOGGER.info("Fixtures source=the_odds count=0 fallback=espn")
         except (TheOddsApiError, httpx.HTTPError, RuntimeError, ValueError) as exc:
             LOGGER.warning("The Odds API fixtures fallback to ESPN: %s", exc)
-    if not rows:
-        rows = _fetch_espn_fixtures(days_ahead)
+    else:
+        LOGGER.info("Fixtures source=the_odds disabled fallback=espn")
 
+    rows = _fetch_espn_fixtures(days_ahead)
+    LOGGER.info("Fixtures source=espn count=%s", len(rows))
+    return _finalize_fixtures(rows)
+
+
+def _finalize_fixtures(rows: list[dict[str, str]]) -> pd.DataFrame:
     fixtures = pd.DataFrame(rows)
     if fixtures.empty:
         return fixtures

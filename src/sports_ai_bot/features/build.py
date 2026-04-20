@@ -243,6 +243,7 @@ def _attach_team_history_features(matches: pd.DataFrame) -> pd.DataFrame:
         row = _build_feature_row(match.League, match.Date, match.HomeTeam, match.AwayTeam, states)
         row["target_over15"] = int((match.FTHG + match.FTAG) > 1.5)
         row["target_over25"] = int((match.FTHG + match.FTAG) > 2.5)
+        row["target_under45"] = int((match.FTHG + match.FTAG) < 4.5)
         row["target_btts"] = int(match.FTHG > 0 and match.FTAG > 0)
         rows.append(row)
         _update_team_states(

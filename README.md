@@ -72,12 +72,23 @@ TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 POST_HOUR_LOCAL=09:00
 BOT_LANGUAGE=es
+THE_ODDS_API_KEY=
+THE_ODDS_API_REGION=eu
+THE_ODDS_API_BOOKMAKER=bet365
+THE_ODDS_API_EXTRA_BOOKMAKERS=pinnacle
+CORNERS_PICK_SELECTION=Over
+CORNERS_PICK_POINT=9.5
+CORNERS_PICK_MIN_PRICE=1.65
+CORNERS_PICK_MAX_PRICE=2.15
 ```
 
 Notas:
 
 - `TELEGRAM_CHAT_ID` de grupos suele empezar por `-100`
 - `POST_HOUR_LOCAL` define la hora diaria de publicacion automatica
+- `THE_ODDS_API_EXTRA_BOOKMAKERS` permite agregar respaldo como `pinnacle`
+- `CORNERS_PICK_SELECTION` y `CORNERS_PICK_POINT` controlan la linea experimental de corners
+- `CORNERS_PICK_MIN_PRICE` y `CORNERS_PICK_MAX_PRICE` filtran el rango de cuota para corners
 
 ## Comandos del proyecto
 

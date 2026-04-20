@@ -53,13 +53,60 @@ def get_odds_for_league(
             "markets": markets,
             "oddsFormat": "decimal",
             "dateFormat": "iso",
-            "bookmakers": get_settings().the_odds_api_bookmaker,
+            "bookmakers": get_settings().the_odds_api_bookmakers_query(),
         },
     )
     return _filter_events_in_window(payload, days_ahead)
 
 
+def get_event_markets_for_league(
+    league_name: str,
+    event_id: str,
+    include_outcomes: bool = False,
+) -> dict[str, Any]:
+    params: dict[str, object] = {"regions": get_settings().the_odds_api_region}
+    if include_outcomes:
+        params.update(
+            {
+                "oddsFormat": "decimal",
+                "dateFormat": "iso",
+            }
+        )
+    params["bookmakers"] = get_settings().the_odds_api_bookmakers_query()
+    payload = get_data(f"/sports/{sport_key_for_league(league_name)}/events/{event_id}/markets", params)
+    if not isinstance(payload, dict):
+        raise TheOddsApiError("Respuesta inesperada de mercados por evento")
+    return payload
+
+
+def get_event_odds_for_league(
+    league_name: str,
+    event_id: str,
+    markets: str,
+) -> dict[str, Any]:
+    payload = get_data(
+        f"/sports/{sport_key_for_league(league_name)}/events/{event_id}/odds",
+        {
+            "regions": get_settings().the_odds_api_region,
+            "markets": markets,
+            "oddsFormat": "decimal",
+            "dateFormat": "iso",
+            "bookmakers": get_settings().the_odds_api_bookmakers_query(),
+        },
+    )
+    if not isinstance(payload, dict):
+        raise TheOddsApiError("Respuesta inesperada de odds por evento")
+    return payload
+
+
 def get_json(path: str, params: dict[str, object]) -> list[dict[str, Any]]:
+    payload = get_data(path, params)
+    if not isinstance(payload, list):
+        raise TheOddsApiError("Respuesta inesperada de The Odds API")
+    return payload
+
+
+def get_data(path: str, params: dict[str, object]) -> Any:
     settings = get_settings()
     if not settings.has_the_odds_api():
         raise RuntimeError("The Odds API no configurada")
@@ -72,9 +119,6 @@ def get_json(path: str, params: dict[str, object]) -> list[dict[str, Any]]:
         response.raise_for_status()
         _log_quota(response)
         payload = response.json()
-
-    if not isinstance(payload, list):
-        raise TheOddsApiError("Respuesta inesperada de The Odds API")
     return payload
 
 
