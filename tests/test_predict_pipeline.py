@@ -25,7 +25,11 @@ def test_build_top_picks_filters_started_matches(monkeypatch, tmp_path: Path) ->
 
     monkeypatch.setattr(pipeline, "get_settings", lambda: settings)
     monkeypatch.setattr(pipeline, "build_fixture_features", lambda: fixtures)
-    monkeypatch.setattr(pipeline, "_attach_market_odds", lambda frame: frame)
+    monkeypatch.setattr(
+        pipeline,
+        "_attach_market_odds",
+        lambda frame: _with_odds(frame, odd_over25=2.0),
+    )
     monkeypatch.setattr(
         pipeline,
         "joblib",
@@ -55,7 +59,11 @@ def test_build_top_picks_uses_default_markets_and_48_hour_window(
 
     monkeypatch.setattr(pipeline, "get_settings", lambda: settings)
     monkeypatch.setattr(pipeline, "build_fixture_features", lambda: fixtures)
-    monkeypatch.setattr(pipeline, "_attach_market_odds", lambda frame: frame)
+    monkeypatch.setattr(
+        pipeline,
+        "_attach_market_odds",
+        lambda frame: _with_odds(frame, odd_over25=2.0),
+    )
     monkeypatch.setattr(pipeline, "joblib", SimpleNamespace(load=_fake_model_loader))
     monkeypatch.setattr(
         pipeline,
@@ -76,7 +84,11 @@ def test_build_market_picks_returns_over15_when_requested(monkeypatch, tmp_path:
 
     monkeypatch.setattr(pipeline, "get_settings", lambda: settings)
     monkeypatch.setattr(pipeline, "build_fixture_features", lambda: fixtures)
-    monkeypatch.setattr(pipeline, "_attach_market_odds", lambda frame: frame)
+    monkeypatch.setattr(
+        pipeline,
+        "_attach_market_odds",
+        lambda frame: _with_odds(frame, odd_over15=1.5),
+    )
     monkeypatch.setattr(pipeline, "joblib", SimpleNamespace(load=_fake_model_loader))
     monkeypatch.setattr(
         pipeline,
@@ -97,7 +109,11 @@ def test_build_market_picks_returns_under45_when_requested(monkeypatch, tmp_path
 
     monkeypatch.setattr(pipeline, "get_settings", lambda: settings)
     monkeypatch.setattr(pipeline, "build_fixture_features", lambda: fixtures)
-    monkeypatch.setattr(pipeline, "_attach_market_odds", lambda frame: frame)
+    monkeypatch.setattr(
+        pipeline,
+        "_attach_market_odds",
+        lambda frame: _with_odds(frame, odd_under45=1.55),
+    )
     monkeypatch.setattr(pipeline, "joblib", SimpleNamespace(load=_fake_model_loader))
     monkeypatch.setattr(
         pipeline,
@@ -125,7 +141,11 @@ def test_build_top_picks_refreshes_fixtures_instead_of_using_cached_file(
 
     monkeypatch.setattr(pipeline, "get_settings", lambda: settings)
     monkeypatch.setattr(pipeline, "build_fixture_features", lambda: refreshed)
-    monkeypatch.setattr(pipeline, "_attach_market_odds", lambda frame: frame)
+    monkeypatch.setattr(
+        pipeline,
+        "_attach_market_odds",
+        lambda frame: _with_odds(frame, odd_over25=2.0),
+    )
     monkeypatch.setattr(
         pipeline,
         "joblib",
@@ -162,11 +182,9 @@ def test_build_top_picks_skips_odds_lookup_when_not_requested(
         lambda: pd.Timestamp("2026-04-18 10:00:00+00:00"),
     )
 
-    picks = pipeline.build_top_picks(limit=10, threshold=0.65)
+    picks = pipeline.build_top_picks(limit=10, threshold=0.65, include_odds=False)
 
-    assert [(pick.match_label, pick.market) for pick in picks] == [
-        ("Near FC vs Soon Town", "Over 2.5")
-    ]
+    assert picks == []
 
 
 def test_build_value_picks_requests_odds_lookup(monkeypatch, tmp_path: Path) -> None:
@@ -179,6 +197,7 @@ def test_build_value_picks_requests_odds_lookup(monkeypatch, tmp_path: Path) -> 
         odds_called = True
         updated = frame.copy()
         updated["odd_over25"] = 2.0
+        updated["odd_home_win"] = 1.5
         return updated
 
     monkeypatch.setattr(pipeline, "get_settings", lambda: settings)
@@ -194,7 +213,35 @@ def test_build_value_picks_requests_odds_lookup(monkeypatch, tmp_path: Path) -> 
     picks = pipeline.build_value_picks(limit=5, min_edge=0.02, min_ev=0.02)
 
     assert odds_called is True
-    assert [pick.match_label for pick in picks] == ["Near FC vs Soon Town"]
+    assert [pick.match_label for pick in picks] == ["Near FC vs Soon Town", "Near FC vs Soon Town"]
+
+
+def test_build_top_picks_includes_home_and_away_1x2_without_draw_by_default(
+    monkeypatch, tmp_path: Path
+) -> None:
+    settings = _make_settings(tmp_path)
+    fixtures = pd.DataFrame([_fixture_row("2026-04-18 12:00:00+00:00", "Near FC", "Soon Town")])
+
+    monkeypatch.setattr(pipeline, "get_settings", lambda: settings)
+    monkeypatch.setattr(pipeline, "build_fixture_features", lambda: fixtures)
+    monkeypatch.setattr(
+        pipeline,
+        "_attach_market_odds",
+        lambda frame: _with_odds(frame, odd_home_win=1.55, odd_draw=3.2, odd_away_win=1.8),
+    )
+    monkeypatch.setattr(pipeline, "joblib", SimpleNamespace(load=_fake_model_loader))
+    monkeypatch.setattr(
+        pipeline,
+        "_now_utc",
+        lambda: pd.Timestamp("2026-04-18 10:00:00+00:00"),
+    )
+
+    picks = pipeline.build_top_picks(limit=10, threshold=0.55)
+
+    assert {(pick.market, pick.selection) for pick in picks} == {
+        ("1X2", "Local"),
+        ("1X2", "Visitante"),
+    }
 
 
 class _FakeModel:
@@ -214,6 +261,12 @@ def _fake_model_loader(path: Path) -> _FakeModel:
         return _FakeModel(0.9)
     if "btts" in path.name:
         return _FakeModel(0.2)
+    if "home_win" in path.name:
+        return _FakeModel(0.8)
+    if "draw" in path.name:
+        return _FakeModel(0.25)
+    if "away_win" in path.name:
+        return _FakeModel(0.72)
     return _FakeModel(0.8)
 
 
@@ -228,6 +281,9 @@ def _make_settings(tmp_path: Path) -> SimpleNamespace:
     (models_dir / "target_over25.joblib").touch()
     (models_dir / "target_under45.joblib").touch()
     (models_dir / "target_btts.joblib").touch()
+    (models_dir / "target_home_win.joblib").touch()
+    (models_dir / "target_draw.joblib").touch()
+    (models_dir / "target_away_win.joblib").touch()
     return SimpleNamespace(
         models_dir=models_dir, processed_dir=processed_dir, reports_dir=reports_dir
     )
@@ -242,3 +298,18 @@ def _fixture_row(match_date: str, home_team: str, away_team: str) -> dict[str, o
     }
     row.update({column: 1.0 for column in pipeline.FEATURE_COLUMNS})
     return row
+
+
+def _with_odds(frame: pd.DataFrame, **odds_values: float) -> pd.DataFrame:
+    updated = frame.copy()
+    for column in [
+        "odd_home_win",
+        "odd_draw",
+        "odd_away_win",
+        "odd_over15",
+        "odd_over25",
+        "odd_under45",
+        "odd_btts",
+    ]:
+        updated[column] = odds_values.get(column)
+    return updated

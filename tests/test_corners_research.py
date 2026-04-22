@@ -253,6 +253,20 @@ def test_format_target_corners_odds_preview_includes_target_line() -> None:
 
 
 def test_build_corners_picks_filters_by_price_and_formats_market(monkeypatch) -> None:
+    monkeypatch.setattr(corners, "_load_corners_model", lambda target_point: object())
+    monkeypatch.setattr(corners, "_load_corners_fixture_features", lambda: None)
+    monkeypatch.setattr(
+        corners,
+        "_corners_model_probability",
+        lambda fixture_features, model, league, match_date, home_team, away_team, selection: 0.7
+        if home_team == "A"
+        else 0.4,
+    )
+    monkeypatch.setattr(
+        corners,
+        "_corners_feature_summary",
+        lambda fixture_features, preview: "Corners recientes local 6.00 | visitante 4.00",
+    )
     monkeypatch.setattr(
         corners,
         "build_target_corners_odds_preview",
@@ -291,6 +305,7 @@ def test_build_corners_picks_filters_by_price_and_formats_market(monkeypatch) ->
     assert len(picks) == 1
     assert picks[0].market == "Over 9.5 Corners"
     assert picks[0].odd == 1.8
+    assert round(picks[0].edge or 0.0, 4) > 0
     assert picks[0].match_label == "A vs B"
     assert picks[0].match_date == "2026-04-20"
     assert picks[0].home_team == "A"

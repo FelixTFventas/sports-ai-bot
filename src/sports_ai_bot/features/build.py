@@ -44,6 +44,10 @@ def _load_raw_csv(file_path: Path) -> pd.DataFrame:
     frame = frame.dropna(subset=["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"])
     frame["FTHG"] = pd.to_numeric(frame["FTHG"], errors="coerce")
     frame["FTAG"] = pd.to_numeric(frame["FTAG"], errors="coerce")
+    if "HC" in frame.columns:
+        frame["HC"] = pd.to_numeric(frame["HC"], errors="coerce")
+    if "AC" in frame.columns:
+        frame["AC"] = pd.to_numeric(frame["AC"], errors="coerce")
     frame = frame.dropna(subset=["FTHG", "FTAG"])
     return frame
 
@@ -119,6 +123,14 @@ def _build_feature_row(
     away_away_goals_for_avg_5 = _rolling_avg(away_state.away_history, "goals_for")
     away_away_goals_against_avg_5 = _rolling_avg(away_state.away_history, "goals_against")
     away_away_points_avg_5 = _rolling_avg(away_state.away_history, "points")
+    home_corners_for_avg_5 = _rolling_avg(home_state.overall_history, "corners_for")
+    home_corners_against_avg_5 = _rolling_avg(home_state.overall_history, "corners_against")
+    away_corners_for_avg_5 = _rolling_avg(away_state.overall_history, "corners_for")
+    away_corners_against_avg_5 = _rolling_avg(away_state.overall_history, "corners_against")
+    home_home_corners_for_avg_5 = _rolling_avg(home_state.home_history, "corners_for")
+    home_home_corners_against_avg_5 = _rolling_avg(home_state.home_history, "corners_against")
+    away_away_corners_for_avg_5 = _rolling_avg(away_state.away_history, "corners_for")
+    away_away_corners_against_avg_5 = _rolling_avg(away_state.away_history, "corners_against")
 
     return {
         "Date": match_date,
@@ -141,6 +153,14 @@ def _build_feature_row(
         "away_away_goals_for_avg_5": away_away_goals_for_avg_5,
         "away_away_goals_against_avg_5": away_away_goals_against_avg_5,
         "away_away_points_avg_5": away_away_points_avg_5,
+        "home_corners_for_avg_5": home_corners_for_avg_5,
+        "home_corners_against_avg_5": home_corners_against_avg_5,
+        "away_corners_for_avg_5": away_corners_for_avg_5,
+        "away_corners_against_avg_5": away_corners_against_avg_5,
+        "home_home_corners_for_avg_5": home_home_corners_for_avg_5,
+        "home_home_corners_against_avg_5": home_home_corners_against_avg_5,
+        "away_away_corners_for_avg_5": away_away_corners_for_avg_5,
+        "away_away_corners_against_avg_5": away_away_corners_against_avg_5,
         "home_rest_days": _days_rest(home_state.last_match_date, match_date),
         "away_rest_days": _days_rest(away_state.last_match_date, match_date),
         "elo_home": home_state.elo,
@@ -152,6 +172,16 @@ def _build_feature_row(
         "defense_diff": None
         if home_goals_against_avg_5 is None or away_goals_against_avg_5 is None
         else away_goals_against_avg_5 - home_goals_against_avg_5,
+        "corners_balance_diff": None
+        if home_corners_for_avg_5 is None
+        or home_corners_against_avg_5 is None
+        or away_corners_for_avg_5 is None
+        or away_corners_against_avg_5 is None
+        else (home_corners_for_avg_5 - home_corners_against_avg_5)
+        - (away_corners_for_avg_5 - away_corners_against_avg_5),
+        "corners_total_avg_5": None
+        if home_corners_for_avg_5 is None or away_corners_for_avg_5 is None
+        else home_corners_for_avg_5 + away_corners_for_avg_5,
         "form_diff": None
         if home_points_avg_5 is None or away_points_avg_5 is None
         else home_points_avg_5 - away_points_avg_5,
@@ -176,6 +206,8 @@ def _update_team_states(
     away_team: str,
     home_goals: float,
     away_goals: float,
+    home_corners: float | None = None,
+    away_corners: float | None = None,
 ) -> None:
     home_state = _get_team_state(states, home_team)
     away_state = _get_team_state(states, away_team)
@@ -186,10 +218,14 @@ def _update_team_states(
     over25 = float(total_goals > 2.5)
     over15 = float(total_goals > 1.5)
     btts = float(home_goals > 0 and away_goals > 0)
+    home_corners_value = float(home_corners) if home_corners is not None else 0.0
+    away_corners_value = float(away_corners) if away_corners is not None else 0.0
 
     home_record = {
         "goals_for": float(home_goals),
         "goals_against": float(away_goals),
+        "corners_for": home_corners_value,
+        "corners_against": away_corners_value,
         "points": float(home_points),
         "over15": over15,
         "over25": over25,
@@ -198,6 +234,8 @@ def _update_team_states(
     away_record = {
         "goals_for": float(away_goals),
         "goals_against": float(home_goals),
+        "corners_for": away_corners_value,
+        "corners_against": home_corners_value,
         "points": float(away_points),
         "over15": over15,
         "over25": over25,
@@ -231,6 +269,8 @@ def _build_state_from_completed_matches(matches: pd.DataFrame) -> dict[str, Team
             match.AwayTeam,
             float(match.FTHG),
             float(match.FTAG),
+            _match_value(match, "HC"),
+            _match_value(match, "AC"),
         )
     return states
 
@@ -245,6 +285,11 @@ def _attach_team_history_features(matches: pd.DataFrame) -> pd.DataFrame:
         row["target_over25"] = int((match.FTHG + match.FTAG) > 2.5)
         row["target_under45"] = int((match.FTHG + match.FTAG) < 4.5)
         row["target_btts"] = int(match.FTHG > 0 and match.FTAG > 0)
+        row["target_home_win"] = int(match.FTHG > match.FTAG)
+        row["target_draw"] = int(match.FTHG == match.FTAG)
+        row["target_away_win"] = int(match.FTHG < match.FTAG)
+        total_corners = _total_corners(match)
+        row["target_corners_over95"] = int(total_corners > 9.5) if total_corners is not None else None
         rows.append(row)
         _update_team_states(
             states,
@@ -253,11 +298,28 @@ def _attach_team_history_features(matches: pd.DataFrame) -> pd.DataFrame:
             match.AwayTeam,
             float(match.FTHG),
             float(match.FTAG),
+            _match_value(match, "HC"),
+            _match_value(match, "AC"),
         )
 
     dataset = pd.DataFrame(rows)
     dataset = dataset.dropna()
     return dataset
+
+
+def _match_value(match: object, attribute: str) -> float | None:
+    value = getattr(match, attribute, None)
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
+def _total_corners(match: object) -> float | None:
+    home_corners = _match_value(match, "HC")
+    away_corners = _match_value(match, "AC")
+    if home_corners is None or away_corners is None:
+        return None
+    return home_corners + away_corners
 
 
 def build_training_dataset() -> pd.DataFrame:

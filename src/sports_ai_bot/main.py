@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 from sports_ai_bot.bot.telegram_bot import run_bot
 from sports_ai_bot.collect.historical import download_historical_data
@@ -35,7 +36,15 @@ from sports_ai_bot.train.train_models import train_models
 from sports_ai_bot.utils.config import get_settings
 
 
+def _configure_console_encoding() -> None:
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
+
 def main() -> None:
+    _configure_console_encoding()
     parser = argparse.ArgumentParser(description="Sports AI Bot")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -131,7 +140,6 @@ def main() -> None:
                 "corners_pick_point": settings.corners_pick_point,
                 "corners_pick_min_price": settings.corners_pick_min_price,
                 "corners_pick_max_price": settings.corners_pick_max_price,
-                "api_football_configured": settings.has_api_football(),
             }
         )
     elif args.command == "run-bot":

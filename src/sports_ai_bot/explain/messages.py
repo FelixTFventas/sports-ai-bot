@@ -9,6 +9,13 @@ def _display_market_name(market: str) -> str:
     return market
 
 
+def _display_pick_name(pick: Pick) -> str:
+    market = _display_market_name(pick.market)
+    if pick.market == "1X2" and pick.selection:
+        return f"{market} {pick.selection}"
+    return market
+
+
 def _display_pick_tier(pick: Pick) -> str:
     return "Premium" if pick.probability >= 0.65 else "Standard"
 
@@ -19,9 +26,22 @@ def build_prediction_message(picks: list[Pick]) -> str:
 
     lines = ["Picks del dia:"]
     for pick in picks:
-        lines.append(
-            f"{pick.match_label} | {_display_market_name(pick.market)} | {pick.probability:.0%} | {_display_pick_tier(pick)} | {pick.confidence}"
-        )
+        details = [
+            pick.match_label,
+            _display_pick_name(pick),
+            f"Prob {pick.probability:.0%}",
+        ]
+        if pick.odd is not None:
+            details.append(f"Cuota {pick.odd:.2f}")
+        if pick.edge is not None:
+            details.append(f"Edge {pick.edge:.1%}")
+        if pick.expected_value is not None:
+            details.append(f"EV {pick.expected_value:.1%}")
+        details.append(_display_pick_tier(pick))
+        details.append(pick.confidence)
+        if pick.is_experimental:
+            details.append("Experimental")
+        lines.append(" | ".join(details))
     lines.append("Pronosticos basados en modelo estadistico, sin garantia de resultado.")
     return "\n".join(lines)
 
@@ -47,7 +67,7 @@ def build_value_message(picks: list[Pick]) -> str:
         edge = f"{pick.edge:.1%}" if pick.edge is not None else "n/d"
         ev = f"{pick.expected_value:.1%}" if pick.expected_value is not None else "n/d"
         lines.append(
-            f"{rating} | {stake} | {pick.match_label} | {_display_market_name(pick.market)} | {_display_pick_tier(pick)} | Prob {pick.probability:.0%} | Cuota {odd} | Edge {edge} | EV {ev}"
+            f"{rating} | {stake} | {pick.match_label} | {_display_pick_name(pick)} | {_display_pick_tier(pick)} | Prob {pick.probability:.0%} | Cuota {odd} | Edge {edge} | EV {ev}"
         )
     lines.append("Value = probabilidad del modelo por encima de la implicita de la cuota.")
     return "\n".join(lines)
@@ -64,6 +84,6 @@ def build_best_message(picks: list[Pick]) -> str:
         odd = f"{pick.odd:.2f}" if pick.odd is not None else "n/d"
         edge = f"{pick.edge:.1%}" if pick.edge is not None else "n/d"
         lines.append(
-            f"{rating} | {stake} | {pick.match_label} | {_display_market_name(pick.market)} | {_display_pick_tier(pick)} | Cuota {odd} | Edge {edge}"
+            f"{rating} | {stake} | {pick.match_label} | {_display_pick_name(pick)} | {_display_pick_tier(pick)} | Cuota {odd} | Edge {edge}"
         )
     return "\n".join(lines)

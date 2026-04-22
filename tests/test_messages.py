@@ -15,6 +15,9 @@ def test_build_prediction_message_shows_premium_and_standard() -> None:
             confidence="Media-Alta",
             model_name="test",
             factors=[],
+            odd=1.8,
+            edge=0.104,
+            expected_value=0.188,
         ),
         Pick(
             match_date="2026-04-18",
@@ -22,15 +25,19 @@ def test_build_prediction_message_shows_premium_and_standard() -> None:
             away_team="D",
             match_label="C vs D",
             league="premier_league",
-            market="BTTS",
+            market="1X2",
+            selection="Local",
             probability=0.61,
             confidence="Media",
             model_name="test",
             factors=[],
+            odd=1.7,
+            edge=0.022,
+            expected_value=0.037,
         ),
     ]
 
     message = build_prediction_message(picks)
 
-    assert "A vs B | Over 2.5 | 66% | Premium | Media-Alta" in message
-    assert "C vs D | Ambos marcan | 61% | Standard | Media" in message
+    assert "A vs B | Over 2.5 | Prob 66% | Cuota 1.80 | Edge 10.4% | EV 18.8% | Premium | Media-Alta" in message
+    assert "C vs D | 1X2 Local | Prob 61% | Cuota 1.70 | Edge 2.2% | EV 3.7% | Standard | Media" in message

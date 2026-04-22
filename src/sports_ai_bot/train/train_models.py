@@ -30,6 +30,14 @@ FEATURE_COLUMNS = [
     "away_away_goals_for_avg_5",
     "away_away_goals_against_avg_5",
     "away_away_points_avg_5",
+    "home_corners_for_avg_5",
+    "home_corners_against_avg_5",
+    "away_corners_for_avg_5",
+    "away_corners_against_avg_5",
+    "home_home_corners_for_avg_5",
+    "home_home_corners_against_avg_5",
+    "away_away_corners_for_avg_5",
+    "away_away_corners_against_avg_5",
     "home_rest_days",
     "away_rest_days",
     "elo_home",
@@ -37,6 +45,8 @@ FEATURE_COLUMNS = [
     "elo_diff",
     "attack_diff",
     "defense_diff",
+    "corners_balance_diff",
+    "corners_total_avg_5",
     "form_diff",
     "goal_balance_diff",
 ]
@@ -135,6 +145,10 @@ def train_models() -> dict[str, dict[str, object]]:
         "target_over25": _train_single_target(frame, "target_over25"),
         "target_under45": _train_single_target(frame, "target_under45"),
         "target_btts": _train_single_target(frame, "target_btts"),
+        "target_home_win": _train_single_target(frame, "target_home_win"),
+        "target_draw": _train_single_target(frame, "target_draw"),
+        "target_away_win": _train_single_target(frame, "target_away_win"),
+        "target_corners_over95": _train_single_target(frame, "target_corners_over95"),
     }
 
     report_file = settings.reports_dir / "training_summary.json"

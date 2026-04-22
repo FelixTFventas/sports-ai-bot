@@ -30,12 +30,6 @@ class Settings(BaseSettings):
     corners_pick_point: float = Field(default=9.5, alias="CORNERS_PICK_POINT")
     corners_pick_min_price: float = Field(default=1.65, alias="CORNERS_PICK_MIN_PRICE")
     corners_pick_max_price: float = Field(default=2.15, alias="CORNERS_PICK_MAX_PRICE")
-    api_football_key: str = Field(default="", alias="API_FOOTBALL_KEY")
-    api_football_base_url: str = Field(
-        default="https://v3.football.api-sports.io", alias="API_FOOTBALL_BASE_URL"
-    )
-    api_football_host: str = Field(default="", alias="API_FOOTBALL_HOST")
-
     data_dir: Path = BASE_DIR / "data"
     raw_dir: Path = data_dir / "raw"
     processed_dir: Path = data_dir / "processed"
@@ -50,9 +44,6 @@ class Settings(BaseSettings):
         if not self.telegram_chat_id:
             missing.append("TELEGRAM_CHAT_ID")
         return missing
-
-    def has_api_football(self) -> bool:
-        return bool(self.api_football_key and self.api_football_base_url)
 
     def has_the_odds_api(self) -> bool:
         return bool(self.the_odds_api_key and self.the_odds_api_base_url)

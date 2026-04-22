@@ -4,13 +4,26 @@ import json
 from collections import Counter
 from dataclasses import dataclass
 
-from sports_ai_bot.predict.pipeline import Pick
+import joblib
+import pandas as pd
+
+from sports_ai_bot.predict.pipeline import (
+    Pick,
+    _confidence_label,
+    _edge,
+    _expected_value,
+    _implied_probability,
+    _load_latest_fixtures,
+    _rating,
+    _stake_units,
+)
 from sports_ai_bot.collect.the_odds_api import (
     get_event_markets_for_league,
     get_event_odds_for_league,
     get_events_for_league,
 )
 from sports_ai_bot.utils.config import get_settings
+from sports_ai_bot.utils.team_names import canonical_team_name
 
 
 TARGET_LEAGUES = (
@@ -80,6 +93,8 @@ def build_corners_picks(
     max_price = settings.corners_pick_max_price if max_price is None else max_price
     picks: list[Pick] = []
     market_label = f"{selection} {target_point:g} Corners"
+    model = _load_corners_model(target_point)
+    fixture_features = _load_corners_fixture_features() if model is not None else pd.DataFrame()
 
     for preview in build_target_corners_odds_preview(
         days_ahead=days_ahead,
@@ -90,30 +105,54 @@ def build_corners_picks(
         odd = float(preview["price"])
         if odd < min_price or odd > max_price:
             continue
-        implied_probability = round(1.0 / odd, 4)
+        implied_probability = _implied_probability(odd)
+        if implied_probability is None:
+            continue
+        probability = _corners_model_probability(
+            fixture_features,
+            model,
+            league=str(preview["league"]),
+            match_date=str(preview["match_date"]),
+            home_team=str(preview["home_team"]),
+            away_team=str(preview["away_team"]),
+            selection=selection,
+        )
+        edge = _edge(probability, odd)
+        expected_value = _expected_value(probability, odd)
+        if edge is None or expected_value is None or edge <= 0:
+            continue
+        pick = Pick(
+            match_date=str(preview["match_date"]),
+            home_team=str(preview["home_team"]),
+            away_team=str(preview["away_team"]),
+            match_label=str(preview["event_label"]),
+            league=str(preview["league"]),
+            market=market_label,
+            selection=selection,
+            line=float(preview["point"]),
+            probability=probability,
+            confidence=_confidence_label(probability),
+            model_name="target_corners_over95" if model is not None else "market_corners_experimental",
+            odd=odd,
+            implied_probability=implied_probability,
+            edge=edge,
+            expected_value=expected_value,
+            bookmaker=str(preview["bookmaker"]),
+            factors=[
+                f"Bookmaker: {preview['bookmaker']}",
+                f"Mercado: {preview['market_key']}",
+                f"Linea objetivo: {selection} {target_point:g}",
+                _corners_feature_summary(fixture_features, preview),
+            ],
+            is_experimental=model is None,
+        )
+        pick.stake_units = _stake_units(pick.edge, pick.expected_value)
+        pick.rating = _rating(pick.edge, pick.expected_value)
         picks.append(
-            Pick(
-                match_date=str(preview["match_date"]),
-                home_team=str(preview["home_team"]),
-                away_team=str(preview["away_team"]),
-                match_label=str(preview["event_label"]),
-                league=str(preview["league"]),
-                market=market_label,
-                probability=implied_probability,
-                confidence=_corners_confidence_label(implied_probability),
-                model_name="market_corners_experimental",
-                odd=odd,
-                implied_probability=implied_probability,
-                factors=[
-                    f"Bookmaker: {preview['bookmaker']}",
-                    f"Mercado: {preview['market_key']}",
-                    f"Linea objetivo: {selection} {target_point:g}",
-                    "Pick experimental basado en cobertura y precio de mercado",
-                ],
-            )
+            pick
         )
 
-    picks.sort(key=lambda item: (item.probability, -(item.odd or 0.0)), reverse=True)
+    picks.sort(key=lambda item: (item.expected_value or 0.0, item.edge or 0.0, item.probability), reverse=True)
     return picks[:limit]
 
 
@@ -270,6 +309,72 @@ def _corners_confidence_label(probability: float) -> str:
     return "Media-Baja"
 
 
+def _load_corners_model(target_point: float):
+    if float(target_point) != 9.5:
+        return None
+    settings = get_settings()
+    model_path = settings.models_dir / "target_corners_over95.joblib"
+    if not model_path.exists():
+        return None
+    return joblib.load(model_path)
+
+
+def _load_corners_fixture_features() -> pd.DataFrame:
+    try:
+        fixtures = _load_latest_fixtures(refresh=False).copy()
+    except FileNotFoundError:
+        return pd.DataFrame()
+    fixtures["Date"] = pd.to_datetime(fixtures["Date"], errors="coerce", utc=True)
+    fixtures["match_date"] = fixtures["Date"].dt.date.astype(str)
+    return fixtures
+
+
+def _corners_model_probability(
+    fixture_features: pd.DataFrame,
+    model,
+    league: str,
+    match_date: str,
+    home_team: str,
+    away_team: str,
+    selection: str,
+) -> float:
+    if model is None or fixture_features.empty:
+        return 0.0
+    match_row = fixture_features[
+        (fixture_features["League"] == league)
+        & (fixture_features["HomeTeam"] == home_team)
+        & (fixture_features["AwayTeam"] == away_team)
+        & (fixture_features["match_date"] == match_date)
+    ]
+    if match_row.empty:
+        return 0.0
+    over_probability = float(model.predict_proba(match_row[model.feature_names_in_])[:, 1][0])
+    if selection.strip().lower() == "under":
+        return 1.0 - over_probability
+    return over_probability
+
+
+def _corners_feature_summary(
+    fixture_features: pd.DataFrame,
+    preview: dict[str, object],
+) -> str:
+    if fixture_features.empty:
+        return "Modelo de corners con features no disponibles en cache"
+    match_row = fixture_features[
+        (fixture_features["League"] == str(preview["league"]))
+        & (fixture_features["HomeTeam"] == str(preview["home_team"]))
+        & (fixture_features["AwayTeam"] == str(preview["away_team"]))
+        & (fixture_features["match_date"] == str(preview["match_date"]))
+    ]
+    if match_row.empty:
+        return "Modelo de corners sin match exacto en fixture_features"
+    row = match_row.iloc[0]
+    return (
+        f"Corners recientes local {row['home_home_corners_for_avg_5']:.2f} | "
+        f"visitante {row['away_away_corners_for_avg_5']:.2f}"
+    )
+
+
 def _research_league(league_name: str, days_ahead: int) -> CornersResearchSummary:
     events = get_events_for_league(league_name, days_ahead=days_ahead)
     event_count = len(events)
@@ -378,13 +483,19 @@ def _preview_league_target_corner_odds(
         )
         if selected_outcome is None:
             continue
+        home_team = canonical_team_name(league_name, str(event.get('home_team', '') or '')) or str(
+            event.get('home_team', '') or ''
+        )
+        away_team = canonical_team_name(league_name, str(event.get('away_team', '') or '')) or str(
+            event.get('away_team', '') or ''
+        )
         previews.append(
             TargetCornersOddsPreview(
                 league=league_name,
                 match_date=_event_match_date(event),
-                home_team=str(event.get('home_team', '') or ''),
-                away_team=str(event.get('away_team', '') or ''),
-                event_label=f"{event.get('home_team', '')} vs {event.get('away_team', '')}",
+                home_team=home_team,
+                away_team=away_team,
+                event_label=f"{home_team} vs {away_team}",
                 market_key=preferred_market,
                 bookmaker=bookmaker,
                 selection=selection,
