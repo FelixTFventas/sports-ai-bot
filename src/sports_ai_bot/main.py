@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from sports_ai_bot.bot.telegram_bot import run_bot
+from sports_ai_bot.bot.telegram_bot import run_bot, send_daily_picks_now
 from sports_ai_bot.collect.historical import download_historical_data
 from sports_ai_bot.evaluate.performance import (
     build_performance_report,
@@ -53,6 +53,7 @@ def main() -> None:
     subparsers.add_parser("build-fixtures")
     subparsers.add_parser("train")
     subparsers.add_parser("run-bot")
+    subparsers.add_parser("send-today")
     subparsers.add_parser("preview-message")
     subparsers.add_parser("preview-over15")
     subparsers.add_parser("preview-under45")
@@ -144,6 +145,8 @@ def main() -> None:
         )
     elif args.command == "run-bot":
         run_bot()
+    elif args.command == "send-today":
+        print(send_daily_picks_now())
     elif args.command == "update-results":
         print(settle_picks())
     elif args.command == "report-performance":

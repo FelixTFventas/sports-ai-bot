@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from telegram import Update
+import asyncio
+
+import httpx
+from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from sports_ai_bot.evaluate.performance import build_performance_report, format_performance_message
@@ -10,6 +13,7 @@ from sports_ai_bot.explain.messages import (
     build_prediction_message,
     build_value_message,
 )
+from sports_ai_bot.external.forebet import ForebetError, fetch_top_picks, format_top_picks_message
 from sports_ai_bot.research.corners import build_corners_picks
 from sports_ai_bot.predict.pipeline import (
     build_best_picks,
@@ -27,7 +31,7 @@ def _safe_message(message: str) -> str:
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Bot listo. Usa /today, /over15, /over, /btts, /corners, /top, /publishnow o /help."
+        "Bot listo. Usa /today, /over15, /over, /btts, /corners, /top, /forebettop, /publishnow o /help."
     )
 
 
@@ -41,6 +45,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/btts - picks Ambos marcan\n"
         f"/corners - picks experimentales {settings.corners_pick_market_label()}\n"
         "/top - mejores picks disponibles\n"
+        "/forebettop - top 5 publicados por Forebet\n"
         "/value - value picks con edge positivo\n"
         "/best - picks premium mas fuertes\n"
         "/publishnow - publica ahora en el chat configurado\n"
@@ -98,6 +103,18 @@ async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(_safe_message(message))
 
 
+async def forebet_top_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        picks = fetch_top_picks(limit=5)
+    except (ForebetError, httpx.HTTPError):
+        await update.message.reply_text(
+            "No se pudieron obtener las top predicciones de Forebet hoy."
+        )
+        return
+
+    await update.message.reply_text(_safe_message(format_top_picks_message(picks)))
+
+
 async def value_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     picks = build_value_picks(limit=5)
     message = build_value_message(picks)
@@ -120,12 +137,21 @@ async def publishnow_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("Publicacion manual enviada al chat configurado.")
 
 
-async def publish_daily_picks(context: ContextTypes.DEFAULT_TYPE) -> None:
-    settings = get_settings()
-    picks = build_top_picks(refresh_fixtures=False)
+async def _send_daily_picks(bot: Bot, chat_id: str, refresh_fixtures: bool) -> str:
+    picks = build_top_picks(refresh_fixtures=refresh_fixtures)
     persist_picks(picks)
     message = build_prediction_message(picks)
-    await context.bot.send_message(chat_id=settings.telegram_chat_id, text=_safe_message(message))
+    await bot.send_message(chat_id=chat_id, text=_safe_message(message))
+    return message
+
+
+async def publish_daily_picks(context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = get_settings()
+    await _send_daily_picks(
+        context.bot,
+        chat_id=settings.telegram_chat_id,
+        refresh_fixtures=False,
+    )
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -149,6 +175,7 @@ def _build_application() -> Application:
     application.add_handler(CommandHandler("btts", btts_command))
     application.add_handler(CommandHandler("corners", corners_command))
     application.add_handler(CommandHandler("top", top_command))
+    application.add_handler(CommandHandler("forebettop", forebet_top_command))
     application.add_handler(CommandHandler("value", value_command))
     application.add_handler(CommandHandler("best", best_command))
     application.add_handler(CommandHandler("publishnow", publishnow_command))
@@ -173,3 +200,20 @@ def _local_time(hour: int, minute: int):
 def run_bot() -> None:
     application = _build_application()
     application.run_polling()
+
+
+def send_daily_picks_now(refresh_fixtures: bool = True) -> str:
+    settings = get_settings()
+    missing = settings.missing_bot_env()
+    if missing:
+        raise ValueError(f"Faltan variables de entorno del bot: {', '.join(missing)}")
+
+    async def _runner() -> str:
+        async with Bot(token=settings.telegram_bot_token) as bot:
+            return await _send_daily_picks(
+                bot,
+                chat_id=settings.telegram_chat_id,
+                refresh_fixtures=refresh_fixtures,
+            )
+
+    return asyncio.run(_runner())

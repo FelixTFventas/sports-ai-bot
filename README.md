@@ -148,6 +148,7 @@ python -m pytest
 - `/over`
 - `/btts`
 - `/top`
+- `/forebettop`
 - `/publishnow`
 - `/performance`
 
