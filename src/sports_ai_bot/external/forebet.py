@@ -141,7 +141,8 @@ def fetch_48h_value_picks(
     limit_matches: int = 30,
     limit: int = 10,
     min_odd: float = 1.50,
-    min_edge: float = 0.03,
+    min_edge: float = 0.0,
+    min_probability: float = 0.60,
     horizon_hours: int = 48,
     timeout: float = 30.0,
 ) -> list[Pick]:
@@ -159,6 +160,8 @@ def fetch_48h_value_picks(
                 limit_matches=limit_matches,
             )
             for pick in match_picks:
+                if pick.probability < min_probability:
+                    continue
                 if pick.edge is None or pick.edge < min_edge:
                     continue
                 current = best_by_match.get(pick.match_label)

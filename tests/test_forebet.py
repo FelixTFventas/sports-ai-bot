@@ -352,6 +352,46 @@ def test_parse_list_value_picks_extracts_1x2_rows() -> None:
     assert all(pick.odd is not None and pick.odd >= 1.50 for pick in picks)
 
 
+def test_fetch_48h_value_picks_filters_min_probability_and_positive_edge(monkeypatch) -> None:
+    class DummyResponse:
+        text = "daily markdown"
+
+        def raise_for_status(self) -> None:
+            pass
+
+    class DummyClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            pass
+
+        def get(self, url: str) -> DummyResponse:
+            return DummyResponse()
+
+    monkeypatch.setattr(forebet.httpx, "Client", DummyClient)
+    monkeypatch.setattr(forebet, "_forebet_48h_urls", lambda now, horizon_hours: ["url-a"])
+    monkeypatch.setattr(forebet, "_forebet_mirror_url", lambda url: url)
+    monkeypatch.setattr(
+        forebet,
+        "parse_list_value_picks",
+        lambda *args, **kwargs: [
+            _pick("Low vs Prob", "1X2", "Local", 0.59, edge=0.20),
+            _pick("Negative vs Edge", "1X2", "Local", 0.70, edge=-0.01),
+            _pick("Good vs Pick", "1X2", "Local", 0.61, edge=0.0),
+        ],
+    )
+
+    picks = forebet.fetch_48h_value_picks(limit_matches=30, limit=10)
+
+    assert [(pick.match_label, pick.probability, pick.edge) for pick in picks] == [
+        ("Good vs Pick", 0.61, 0.0)
+    ]
+
+
 def _pick(
     match_label: str,
     market: str,
