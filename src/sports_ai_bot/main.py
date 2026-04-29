@@ -12,10 +12,12 @@ from sports_ai_bot.evaluate.performance import (
 )
 from sports_ai_bot.explain.messages import (
     build_best_message,
+    build_forebet_value_message,
     build_market_message,
     build_prediction_message,
     build_value_message,
 )
+from sports_ai_bot.external.forebet import fetch_48h_value_picks, fetch_match_value_picks
 from sports_ai_bot.research.corners import (
     build_corners_picks,
     build_corners_odds_preview,
@@ -67,6 +69,9 @@ def main() -> None:
     subparsers.add_parser("report-performance")
     subparsers.add_parser("preview-value")
     subparsers.add_parser("preview-best")
+    preview_forebet_value_parser = subparsers.add_parser("preview-forebet-value")
+    preview_forebet_value_parser.add_argument("url", nargs="?")
+    subparsers.add_parser("preview-forebet48h")
 
     args = parser.parse_args()
 
@@ -158,6 +163,15 @@ def main() -> None:
     elif args.command == "preview-best":
         picks = build_best_picks()
         print(build_best_message(picks))
+    elif args.command == "preview-forebet-value":
+        if args.url:
+            picks = fetch_match_value_picks(args.url, limit=5, min_odd=1.50)
+        else:
+            picks = fetch_48h_value_picks(limit_matches=30, limit=10, min_odd=1.50)
+        print(build_forebet_value_message(picks))
+    elif args.command == "preview-forebet48h":
+        picks = fetch_48h_value_picks(limit_matches=30, limit=10, min_odd=1.50)
+        print(build_forebet_value_message(picks))
 
 
 if __name__ == "__main__":

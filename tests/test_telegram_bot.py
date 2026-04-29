@@ -97,6 +97,79 @@ def test_forebet_top_command_handles_failure(monkeypatch) -> None:
     assert replies == ["No se pudieron obtener las top predicciones de Forebet hoy."]
 
 
+def test_forebet_value_command_without_url_uses_48h_value(monkeypatch) -> None:
+    replies: list[str] = []
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=lambda text: replies.append(text)))
+    update.message.reply_text = _async_reply(update.message.reply_text)
+    context = SimpleNamespace(args=[])
+    picks = [object()]
+
+    monkeypatch.setattr(
+        telegram_bot,
+        "fetch_48h_value_picks",
+        lambda limit_matches=30, limit=10, min_odd=1.50: picks,
+    )
+    monkeypatch.setattr(telegram_bot, "build_forebet_value_message", lambda value: "Forebet 48h value")
+
+    asyncio.run(telegram_bot.forebet_value_command(update, context))
+
+    assert replies == ["Forebet 48h value"]
+
+
+def test_forebet_value_command_sends_message(monkeypatch) -> None:
+    replies: list[str] = []
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=lambda text: replies.append(text)))
+    update.message.reply_text = _async_reply(update.message.reply_text)
+    context = SimpleNamespace(args=["https://www.forebet.com/es/football/matches/a-b-1"])
+    picks = [object()]
+
+    monkeypatch.setattr(
+        telegram_bot,
+        "fetch_match_value_picks",
+        lambda url, limit=5, min_odd=1.50: picks,
+    )
+    monkeypatch.setattr(telegram_bot, "build_forebet_value_message", lambda value: "Forebet value")
+
+    asyncio.run(telegram_bot.forebet_value_command(update, context))
+
+    assert replies == ["Forebet value"]
+
+
+def test_forebet_value_command_handles_failure(monkeypatch) -> None:
+    replies: list[str] = []
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=lambda text: replies.append(text)))
+    update.message.reply_text = _async_reply(update.message.reply_text)
+    context = SimpleNamespace(args=["https://www.forebet.com/es/football/matches/a-b-1"])
+
+    monkeypatch.setattr(
+        telegram_bot,
+        "fetch_match_value_picks",
+        lambda url, limit=5, min_odd=1.50: (_ for _ in ()).throw(ForebetError("boom")),
+    )
+
+    asyncio.run(telegram_bot.forebet_value_command(update, context))
+
+    assert replies == ["No se pudieron analizar value picks de Forebet."]
+
+
+def test_forebet_48h_command_sends_message(monkeypatch) -> None:
+    replies: list[str] = []
+    update = SimpleNamespace(message=SimpleNamespace(reply_text=lambda text: replies.append(text)))
+    update.message.reply_text = _async_reply(update.message.reply_text)
+    picks = [object()]
+
+    monkeypatch.setattr(
+        telegram_bot,
+        "fetch_48h_value_picks",
+        lambda limit_matches=30, limit=10, min_odd=1.50: picks,
+    )
+    monkeypatch.setattr(telegram_bot, "build_forebet_value_message", lambda value: "Forebet 48h")
+
+    asyncio.run(telegram_bot.forebet_48h_command(update, None))
+
+    assert replies == ["Forebet 48h"]
+
+
 def _async_reply(fn):
     async def wrapper(text: str) -> None:
         fn(text)

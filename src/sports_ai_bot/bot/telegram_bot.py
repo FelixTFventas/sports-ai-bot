@@ -9,11 +9,18 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from sports_ai_bot.evaluate.performance import build_performance_report, format_performance_message
 from sports_ai_bot.explain.messages import (
     build_best_message,
+    build_forebet_value_message,
     build_market_message,
     build_prediction_message,
     build_value_message,
 )
-from sports_ai_bot.external.forebet import ForebetError, fetch_top_picks, format_top_picks_message
+from sports_ai_bot.external.forebet import (
+    ForebetError,
+    fetch_48h_value_picks,
+    fetch_match_value_picks,
+    fetch_top_picks,
+    format_top_picks_message,
+)
 from sports_ai_bot.research.corners import build_corners_picks
 from sports_ai_bot.predict.pipeline import (
     build_best_picks,
@@ -31,7 +38,7 @@ def _safe_message(message: str) -> str:
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Bot listo. Usa /today, /over15, /over, /btts, /corners, /top, /forebettop, /publishnow o /help."
+        "Bot listo. Usa /today, /over15, /over, /btts, /corners, /top, /forebettop, /forebetvalue, /forebet48h, /publishnow o /help."
     )
 
 
@@ -46,6 +53,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         f"/corners - picks experimentales {settings.corners_pick_market_label()}\n"
         "/top - mejores picks disponibles\n"
         "/forebettop - top 5 publicados por Forebet\n"
+        "/forebetvalue [url] - analiza value Forebet; sin url usa proximas 48h\n"
+        "/forebet48h - value Forebet de partidos en proximas 48h\n"
         "/value - value picks con edge positivo\n"
         "/best - picks premium mas fuertes\n"
         "/publishnow - publica ahora en el chat configurado\n"
@@ -115,6 +124,30 @@ async def forebet_top_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(_safe_message(format_top_picks_message(picks)))
 
 
+async def forebet_value_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    args = getattr(context, "args", []) if context is not None else []
+    try:
+        if args:
+            picks = fetch_match_value_picks(args[0], limit=5, min_odd=1.50)
+        else:
+            picks = fetch_48h_value_picks(limit_matches=30, limit=10, min_odd=1.50)
+    except (ForebetError, httpx.HTTPError):
+        await update.message.reply_text("No se pudieron analizar value picks de Forebet.")
+        return
+
+    await update.message.reply_text(_safe_message(build_forebet_value_message(picks)))
+
+
+async def forebet_48h_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        picks = fetch_48h_value_picks(limit_matches=30, limit=10, min_odd=1.50)
+    except (ForebetError, httpx.HTTPError):
+        await update.message.reply_text("No se pudieron analizar value picks Forebet de 48h.")
+        return
+
+    await update.message.reply_text(_safe_message(build_forebet_value_message(picks)))
+
+
 async def value_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     picks = build_value_picks(limit=5)
     message = build_value_message(picks)
@@ -176,6 +209,8 @@ def _build_application() -> Application:
     application.add_handler(CommandHandler("corners", corners_command))
     application.add_handler(CommandHandler("top", top_command))
     application.add_handler(CommandHandler("forebettop", forebet_top_command))
+    application.add_handler(CommandHandler("forebetvalue", forebet_value_command))
+    application.add_handler(CommandHandler("forebet48h", forebet_48h_command))
     application.add_handler(CommandHandler("value", value_command))
     application.add_handler(CommandHandler("best", best_command))
     application.add_handler(CommandHandler("publishnow", publishnow_command))
