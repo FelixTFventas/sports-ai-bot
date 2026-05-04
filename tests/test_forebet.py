@@ -385,7 +385,7 @@ def test_fetch_48h_value_picks_filters_min_probability_and_positive_edge(monkeyp
         ],
     )
 
-    picks = forebet.fetch_48h_value_picks(limit_matches=30, limit=10)
+    picks = forebet.fetch_48h_value_picks(limit_matches=30, limit=10, min_probability=0.60)
 
     assert [(pick.match_label, pick.probability, pick.edge) for pick in picks] == [
         ("Good vs Pick", 0.61, 0.0)

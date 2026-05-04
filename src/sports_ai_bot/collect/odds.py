@@ -36,7 +36,7 @@ def load_upcoming_market_odds() -> pd.DataFrame:
                 return the_odds_api_odds
             LOGGER.info("Odds source=the_odds count=0 fallback=espn_csv")
         except (TheOddsApiError, httpx.HTTPError, RuntimeError, ValueError) as exc:
-            LOGGER.warning("The Odds API odds fallback to ESPN/CSV: %s", exc)
+            LOGGER.warning("The Odds API odds fallback to ESPN/CSV: %s", _safe_error_message(exc))
     else:
         LOGGER.info("Odds source=the_odds disabled fallback=espn_csv")
 
@@ -76,7 +76,12 @@ def _fetch_the_odds_api_league_odds(league_name: str, days_ahead: int) -> list[d
                 days_ahead=days_ahead,
             )
         except (TheOddsApiError, httpx.HTTPError, RuntimeError, ValueError) as exc:
-            LOGGER.info("Odds The Odds API %s skipped market=%s reason=%s", league_name, market_key, exc)
+            LOGGER.info(
+                "Odds The Odds API %s skipped market=%s reason=%s",
+                league_name,
+                market_key,
+                _safe_error_message(exc),
+            )
             payloads[market_key] = []
 
     if not any(payloads.values()):
@@ -367,3 +372,9 @@ def _first_available_decimal(frame: pd.DataFrame, columns: list[str]) -> pd.Seri
             continue
         result = result.fillna(pd.to_numeric(frame[column], errors="coerce"))
     return result
+
+
+def _safe_error_message(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    return str(exc)

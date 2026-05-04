@@ -42,7 +42,7 @@ def fetch_upcoming_fixtures(days_ahead: int = 7) -> pd.DataFrame:
                 return _finalize_fixtures(rows)
             LOGGER.info("Fixtures source=the_odds count=0 fallback=espn")
         except (TheOddsApiError, httpx.HTTPError, RuntimeError, ValueError) as exc:
-            LOGGER.warning("The Odds API fixtures fallback to ESPN: %s", exc)
+            LOGGER.warning("The Odds API fixtures fallback to ESPN: %s", _safe_error_message(exc))
     else:
         LOGGER.info("Fixtures source=the_odds disabled fallback=espn")
 
@@ -158,3 +158,9 @@ def _fetch_league_day(
     if rows:
         LOGGER.info("Fixtures ESPN %s %s: %s", league_name, date_value, len(rows))
     return rows
+
+
+def _safe_error_message(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    return str(exc)

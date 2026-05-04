@@ -24,25 +24,31 @@ def build_prediction_message(picks: list[Pick]) -> str:
     if not picks:
         return "No hay picks con confianza suficiente para hoy."
 
-    lines = ["Picks del dia:"]
-    for pick in picks:
-        details = [
-            pick.match_label,
-            _display_pick_name(pick),
-            f"Prob {pick.probability:.0%}",
-        ]
-        if pick.odd is not None:
-            details.append(f"Cuota {pick.odd:.2f}")
-        if pick.edge is not None:
-            details.append(f"Edge {pick.edge:.1%}")
-        if pick.expected_value is not None:
-            details.append(f"EV {pick.expected_value:.1%}")
-        details.append(_display_pick_tier(pick))
-        details.append(pick.confidence)
+    lines = ["🎯 Picks del dia", ""]
+    for index, pick in enumerate(picks, start=1):
+        odd = f"{pick.odd:.2f}" if pick.odd is not None else "n/d"
+        lines.extend(
+            [
+                f"{index}. {_pick_value_icon(pick)} {pick.match_label}",
+                f"📌 Pick: {_display_pick_name(pick)}",
+                f"📊 Probabilidad: {pick.probability:.1%}",
+                f"💰 Cuota: {odd}",
+                f"📈 Edge: {_signed_percent(pick.edge)}",
+                f"🔥 EV: {_signed_percent(pick.expected_value)}",
+                f"⭐ Nivel: {_display_pick_tier(pick)} | Confianza: {pick.confidence}",
+            ]
+        )
         if pick.is_experimental:
-            details.append("Experimental")
-        lines.append(" | ".join(details))
-    lines.append("Pronosticos basados en modelo estadistico, sin garantia de resultado.")
+            lines.append("🧪 Experimental")
+        if index < len(picks):
+            lines.append("")
+    lines.extend(
+        [
+            "",
+            "📐 Modelo: estadistico propio + cuotas de mercado",
+            "⚠️ Pronosticos estadisticos, sin garantia de resultado.",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -138,3 +144,12 @@ def _forebet_value_icon(pick: Pick) -> str:
     if edge >= 0.03:
         return "🟡"
     return "🔴"
+
+
+def _pick_value_icon(pick: Pick) -> str:
+    edge = pick.edge or 0.0
+    if edge >= 0.10:
+        return "🟢"
+    if edge >= 0.03:
+        return "🟡"
+    return "🔵"

@@ -39,8 +39,16 @@ def test_build_prediction_message_shows_premium_and_standard() -> None:
 
     message = build_prediction_message(picks)
 
-    assert "A vs B | Over 2.5 | Prob 66% | Cuota 1.80 | Edge 10.4% | EV 18.8% | Premium | Media-Alta" in message
-    assert "C vs D | 1X2 Local | Prob 61% | Cuota 1.70 | Edge 2.2% | EV 3.7% | Standard | Media" in message
+    assert message.startswith("🎯 Picks del dia")
+    assert "1. 🟢 A vs B" in message
+    assert "📌 Pick: Over 2.5" in message
+    assert "📊 Probabilidad: 66.0%" in message
+    assert "📈 Edge: +10.4%" in message
+    assert "🔥 EV: +18.8%" in message
+    assert "⭐ Nivel: Premium | Confianza: Media-Alta" in message
+    assert "2. 🔵 C vs D" in message
+    assert "📌 Pick: 1X2 Local" in message
+    assert "⭐ Nivel: Standard | Confianza: Media" in message
 
 
 def test_build_forebet_value_message_includes_selection() -> None:

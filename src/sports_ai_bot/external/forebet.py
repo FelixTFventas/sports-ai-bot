@@ -142,7 +142,7 @@ def fetch_48h_value_picks(
     limit: int = 10,
     min_odd: float = 1.50,
     min_edge: float = 0.0,
-    min_probability: float = 0.60,
+    min_probability: float = 0.55,
     horizon_hours: int = 48,
     timeout: float = 30.0,
 ) -> list[Pick]:
@@ -150,8 +150,11 @@ def fetch_48h_value_picks(
     best_by_match: dict[str, Pick] = {}
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
         for source_url in _forebet_48h_urls(now, horizon_hours=horizon_hours):
-            response = client.get(_forebet_mirror_url(source_url))
-            response.raise_for_status()
+            try:
+                response = client.get(_forebet_mirror_url(source_url))
+                response.raise_for_status()
+            except httpx.HTTPError:
+                continue
             match_picks = parse_list_value_picks(
                 response.text,
                 horizon_hours=horizon_hours,
