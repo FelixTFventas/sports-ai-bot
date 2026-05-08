@@ -98,10 +98,12 @@ def build_value_picks(
     min_ev: float = 0.0,
     min_odd: float = 1.40,
     include_draw: bool = False,
+    refresh_fixtures: bool = True,
 ) -> list[Pick]:
     picks = build_top_picks(
         limit=limit * 6,
         threshold=0.50,
+        refresh_fixtures=refresh_fixtures,
         include_odds=True,
         min_odd=min_odd,
         min_edge=min_edge,
@@ -120,8 +122,13 @@ def build_value_picks(
     return value_picks[:limit]
 
 
-def build_best_picks(limit: int = 5) -> list[Pick]:
-    picks = build_value_picks(limit=limit * 6, min_edge=0.02, min_ev=0.02)
+def build_best_picks(limit: int = 5, refresh_fixtures: bool = True) -> list[Pick]:
+    picks = build_value_picks(
+        limit=limit * 6,
+        min_edge=0.02,
+        min_ev=0.02,
+        refresh_fixtures=refresh_fixtures,
+    )
     best_by_match: dict[str, Pick] = {}
     for pick in picks:
         current = best_by_match.get(pick.match_label)

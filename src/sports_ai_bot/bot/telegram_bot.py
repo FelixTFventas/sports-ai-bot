@@ -4,7 +4,9 @@ import asyncio
 
 import httpx
 from telegram import Bot, Update
+from telegram.error import TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.request import HTTPXRequest
 
 from sports_ai_bot.evaluate.performance import build_performance_report, format_performance_message
 from sports_ai_bot.explain.messages import (
@@ -23,6 +25,7 @@ from sports_ai_bot.external.forebet import (
 )
 from sports_ai_bot.research.corners import build_corners_picks
 from sports_ai_bot.predict.pipeline import (
+    Pick,
     build_best_picks,
     build_market_picks,
     build_top_picks,
@@ -171,11 +174,106 @@ async def publishnow_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def _send_daily_picks(bot: Bot, chat_id: str, refresh_fixtures: bool) -> str:
-    picks = build_top_picks(refresh_fixtures=refresh_fixtures)
+    messages, picks = _build_daily_pick_messages(refresh_fixtures=refresh_fixtures)
     persist_picks(picks)
-    message = build_prediction_message(picks)
-    await bot.send_message(chat_id=chat_id, text=_safe_message(message))
-    return message
+    for message in messages:
+        await _send_message_with_retry(bot, chat_id=chat_id, text=_safe_message(message))
+    return "\n\n".join(messages)
+
+
+async def _send_message_with_retry(bot: Bot, chat_id: str, text: str) -> None:
+    try:
+        await bot.send_message(chat_id=chat_id, text=text)
+    except TimedOut:
+        await asyncio.sleep(2)
+        await bot.send_message(chat_id=chat_id, text=text)
+
+
+def _build_daily_pick_messages(refresh_fixtures: bool) -> tuple[list[str], list[Pick]]:
+    settings = get_settings()
+    messages: list[str] = []
+    all_picks: list[Pick] = []
+
+    candidate_picks = build_top_picks(
+        limit=120,
+        threshold=0.50,
+        refresh_fixtures=refresh_fixtures,
+    )
+    top_picks = candidate_picks[:20]
+    messages.append(build_prediction_message(top_picks))
+    all_picks.extend(top_picks)
+
+    market_specs = [
+        ("Over 1.5", 10, 0.65),
+        ("Over 2.5", 10, 0.60),
+        ("Under 4.5", 10, 0.72),
+        ("BTTS", 10, 0.60),
+    ]
+    for market, limit, threshold in market_specs:
+        picks = _filter_market_picks(candidate_picks, market, limit=limit, threshold=threshold)
+        messages.append(build_market_message(picks, market))
+        all_picks.extend(picks)
+
+    value_picks = _filter_value_picks(candidate_picks, limit=10)
+    messages.append(build_value_message(value_picks))
+    all_picks.extend(value_picks)
+
+    best_picks = _filter_best_picks(candidate_picks, limit=5)
+    messages.append(build_best_message(best_picks))
+    all_picks.extend(best_picks)
+
+    if settings.has_the_odds_api():
+        corners_picks = build_corners_picks(
+            limit=6,
+            days_ahead=2,
+            limit_per_league=2,
+            target_point=settings.corners_pick_point,
+            selection=settings.corners_pick_selection,
+        )
+        messages.append(build_market_message(corners_picks, settings.corners_pick_market_label()))
+        all_picks.extend(corners_picks)
+
+    return messages, all_picks
+
+
+def _filter_market_picks(
+    picks: list[Pick], market: str, limit: int, threshold: float
+) -> list[Pick]:
+    return [
+        pick
+        for pick in picks
+        if pick.market.lower() == market.lower() and pick.probability >= threshold
+    ][:limit]
+
+
+def _filter_value_picks(picks: list[Pick], limit: int) -> list[Pick]:
+    return [
+        pick
+        for pick in picks
+        if pick.edge is not None
+        and pick.edge >= 0.02
+        and pick.expected_value is not None
+        and pick.expected_value >= 0.0
+    ][:limit]
+
+
+def _filter_best_picks(picks: list[Pick], limit: int) -> list[Pick]:
+    best_by_match: dict[str, Pick] = {}
+    for pick in _filter_value_picks(picks, limit=limit * 6):
+        if pick.expected_value is None or pick.expected_value < 0.02:
+            continue
+        current = best_by_match.get(pick.match_label)
+        if current is None or _pick_message_score(pick) > _pick_message_score(current):
+            best_by_match[pick.match_label] = pick
+    return sorted(best_by_match.values(), key=_pick_message_score, reverse=True)[:limit]
+
+
+def _pick_message_score(pick: Pick) -> tuple[float, float, float]:
+    return (
+        float(pick.expected_value or 0.0),
+        float(pick.edge or 0.0),
+        float(pick.probability),
+    )
 
 
 async def publish_daily_picks(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -244,7 +342,8 @@ def send_daily_picks_now(refresh_fixtures: bool = True) -> str:
         raise ValueError(f"Faltan variables de entorno del bot: {', '.join(missing)}")
 
     async def _runner() -> str:
-        async with Bot(token=settings.telegram_bot_token) as bot:
+        request = HTTPXRequest(connect_timeout=30, read_timeout=60, write_timeout=30)
+        async with Bot(token=settings.telegram_bot_token, request=request) as bot:
             return await _send_daily_picks(
                 bot,
                 chat_id=settings.telegram_chat_id,
