@@ -65,17 +65,30 @@ def build_value_message(picks: list[Pick]) -> str:
     if not picks:
         return "No hay value picks disponibles con el edge minimo actual."
 
-    lines = ["Value picks del dia:"]
-    for pick in picks:
+    lines = ["💎 Value picks del dia", ""]
+    for index, pick in enumerate(picks, start=1):
         stake = f"{pick.stake_units}u" if pick.stake_units is not None else "n/d"
         rating = pick.rating or "n/d"
         odd = f"{pick.odd:.2f}" if pick.odd is not None else "n/d"
-        edge = f"{pick.edge:.1%}" if pick.edge is not None else "n/d"
-        ev = f"{pick.expected_value:.1%}" if pick.expected_value is not None else "n/d"
-        lines.append(
-            f"{rating} | {stake} | {pick.match_label} | {_display_pick_name(pick)} | {_display_pick_tier(pick)} | Prob {pick.probability:.0%} | Cuota {odd} | Edge {edge} | EV {ev}"
+        lines.extend(
+            [
+                f"{index}. {_pick_value_icon(pick)} {pick.match_label}",
+                f"📌 Pick: {_display_pick_name(pick)}",
+                f"📊 Probabilidad: {pick.probability:.1%}",
+                f"💰 Cuota: {odd}",
+                f"📈 Edge: {_signed_percent(pick.edge)}",
+                f"🔥 EV: {_signed_percent(pick.expected_value)}",
+                f"⭐ Rating: {rating} | Stake: {stake} | Nivel: {_display_pick_tier(pick)}",
+            ]
         )
-    lines.append("Value = probabilidad del modelo por encima de la implicita de la cuota.")
+        if index < len(picks):
+            lines.append("")
+    lines.extend(
+        [
+            "",
+            "Value = probabilidad del modelo por encima de la implicita de la cuota.",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -112,15 +125,22 @@ def build_best_message(picks: list[Pick]) -> str:
     if not picks:
         return "No hay best picks disponibles con el criterio premium actual."
 
-    lines = ["Best picks del dia:"]
-    for pick in picks:
+    lines = ["🏆 Best picks del dia", ""]
+    for index, pick in enumerate(picks, start=1):
         stake = f"{pick.stake_units}u" if pick.stake_units is not None else "n/d"
         rating = pick.rating or "n/d"
         odd = f"{pick.odd:.2f}" if pick.odd is not None else "n/d"
-        edge = f"{pick.edge:.1%}" if pick.edge is not None else "n/d"
-        lines.append(
-            f"{rating} | {stake} | {pick.match_label} | {_display_pick_name(pick)} | {_display_pick_tier(pick)} | Cuota {odd} | Edge {edge}"
+        lines.extend(
+            [
+                f"{index}. {_pick_value_icon(pick)} {pick.match_label}",
+                f"📌 Pick: {_display_pick_name(pick)}",
+                f"💰 Cuota: {odd}",
+                f"📈 Edge: {_signed_percent(pick.edge)}",
+                f"⭐ Rating: {rating} | Stake: {stake} | Nivel: {_display_pick_tier(pick)}",
+            ]
         )
+        if index < len(picks):
+            lines.append("")
     return "\n".join(lines)
 
 
