@@ -205,8 +205,11 @@ def test_format_top_picks_message_includes_reference_note() -> None:
 
     message = format_top_picks_message(picks)
 
-    assert message.startswith("Top 5 Forebet del dia:")
-    assert "1. IFK Berga Oskarshamns AIK | Pick 2 | Prob 80%" in message
+    assert message.startswith("🏆 Top Forebet del dia")
+    assert "1. IFK Berga Oskarshamns AIK" in message
+    assert "📌 Pick: Visitante" in message
+    assert "📊 Probabilidad Forebet: 80%" in message
+    assert "🎯 Marcador previsto: 1-3" in message
     assert message.endswith("Fuente externa de referencia: Forebet.")
 
 

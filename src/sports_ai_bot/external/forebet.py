@@ -358,13 +358,25 @@ def format_top_picks_message(picks: list[ForebetPick]) -> str:
     if not picks:
         return "No hay predicciones disponibles en Forebet."
 
-    lines = ["Top 5 Forebet del dia:"]
+    lines = ["🏆 Top Forebet del dia", ""]
     for index, pick in enumerate(picks, start=1):
-        lines.append(
-            f"{index}. {pick.match_label} | Pick {pick.prediction} | Prob {pick.probability}% | Marcador {pick.predicted_score} | {pick.match_date} {pick.match_time}"
+        lines.extend(
+            [
+                f"{index}. {pick.match_label}",
+                f"📌 Pick: {_display_forebet_top_prediction(pick.prediction)}",
+                f"📊 Probabilidad Forebet: {pick.probability}%",
+                f"🎯 Marcador previsto: {pick.predicted_score}",
+                f"🕒 Fecha: {pick.match_date} {pick.match_time}",
+            ]
         )
-    lines.append("Fuente externa de referencia: Forebet.")
+        if index < len(picks):
+            lines.append("")
+    lines.extend(["", "Fuente externa de referencia: Forebet."])
     return "\n".join(lines)
+
+
+def _display_forebet_top_prediction(prediction: str) -> str:
+    return {"1": "Local", "X": "Empate", "2": "Visitante"}.get(prediction, prediction)
 
 
 def _normalize_spaces(value: str) -> str:
