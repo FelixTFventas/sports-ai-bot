@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
     post_hour_local: str = Field(default="09:00", alias="POST_HOUR_LOCAL")
+    bot_timezone: str = Field(default="America/Bogota", alias="BOT_TIMEZONE")
     bot_language: str = Field(default="es", alias="BOT_LANGUAGE")
     the_odds_api_key: str = Field(default="", alias="THE_ODDS_API_KEY")
     the_odds_api_base_url: str = Field(
@@ -30,12 +31,27 @@ class Settings(BaseSettings):
     corners_pick_point: float = Field(default=9.5, alias="CORNERS_PICK_POINT")
     corners_pick_min_price: float = Field(default=1.65, alias="CORNERS_PICK_MIN_PRICE")
     corners_pick_max_price: float = Field(default=2.15, alias="CORNERS_PICK_MAX_PRICE")
-    data_dir: Path = BASE_DIR / "data"
-    raw_dir: Path = data_dir / "raw"
-    processed_dir: Path = data_dir / "processed"
-    models_dir: Path = data_dir / "models"
-    predictions_dir: Path = data_dir / "predictions"
-    reports_dir: Path = data_dir / "reports"
+    data_dir: Path = Field(default=BASE_DIR / "data", alias="DATA_DIR")
+
+    @property
+    def raw_dir(self) -> Path:
+        return self.data_dir / "raw"
+
+    @property
+    def processed_dir(self) -> Path:
+        return self.data_dir / "processed"
+
+    @property
+    def models_dir(self) -> Path:
+        return self.data_dir / "models"
+
+    @property
+    def predictions_dir(self) -> Path:
+        return self.data_dir / "predictions"
+
+    @property
+    def reports_dir(self) -> Path:
+        return self.data_dir / "reports"
 
     def missing_bot_env(self) -> list[str]:
         missing: list[str] = []

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from zoneinfo import ZoneInfo
 
 import httpx
 from telegram import Bot, Update
@@ -52,6 +53,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/today - picks del dia\n"
         "/over15 - picks Over 1.5\n"
         "/over - picks Over 2.5\n"
+        "/under45 - picks Under 4.5\n"
         "/btts - picks Ambos marcan\n"
         f"/corners - picks experimentales {settings.corners_pick_market_label()}\n"
         "/top - mejores picks disponibles\n"
@@ -318,16 +320,16 @@ def _build_application() -> Application:
     hour, minute = settings.post_hour_local.split(":")
     application.job_queue.run_daily(
         publish_daily_picks,
-        time=_local_time(int(hour), int(minute)),
+        time=_local_time(int(hour), int(minute), settings.bot_timezone),
         name="daily-picks",
     )
     return application
 
 
-def _local_time(hour: int, minute: int):
+def _local_time(hour: int, minute: int, timezone_name: str):
     from datetime import time
 
-    return time(hour=hour, minute=minute)
+    return time(hour=hour, minute=minute, tzinfo=ZoneInfo(timezone_name))
 
 
 def run_bot() -> None:

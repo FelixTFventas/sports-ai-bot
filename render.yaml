@@ -1,0 +1,35 @@
+services:
+  - type: worker
+    name: sports-ai-bot
+    runtime: python
+    buildCommand: pip install -e .
+    startCommand: python -m sports_ai_bot.main run-bot
+    envVars:
+      - key: DATA_DIR
+        value: /var/data
+      - key: BOT_TIMEZONE
+        value: America/Bogota
+      - key: POST_HOUR_LOCAL
+        value: "09:00"
+      - key: BOT_LANGUAGE
+        value: es
+      - key: THE_ODDS_API_REGION
+        value: eu
+      - key: THE_ODDS_API_BOOKMAKER
+        value: bet365
+      - key: THE_ODDS_API_EXTRA_BOOKMAKERS
+        value: pinnacle
+      - key: CORNERS_PICK_SELECTION
+        value: Over
+      - key: CORNERS_PICK_POINT
+        value: "9.5"
+      - key: CORNERS_PICK_MIN_PRICE
+        value: "1.65"
+      - key: CORNERS_PICK_MAX_PRICE
+        value: "2.15"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: THE_ODDS_API_KEY
+        sync: false
