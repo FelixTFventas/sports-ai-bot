@@ -200,6 +200,26 @@ def persist_picks(picks: list[Pick]) -> pd.DataFrame:
         ]
     )
     output_file = settings.predictions_dir / f"picks_{date.today().isoformat()}.csv"
+    if output_file.exists():
+        try:
+            existing = pd.read_csv(output_file)
+        except EmptyDataError:
+            existing = pd.DataFrame()
+        if not existing.empty:
+            frame = pd.concat([existing, frame], ignore_index=True)
+            frame = frame.drop_duplicates(
+                subset=[
+                    "prediction_date",
+                    "match_date",
+                    "home_team",
+                    "away_team",
+                    "league",
+                    "market",
+                    "selection",
+                    "line",
+                ],
+                keep="first",
+            )
     frame.to_csv(output_file, index=False)
     return frame
 

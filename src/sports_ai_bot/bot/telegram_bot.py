@@ -225,15 +225,19 @@ def _build_daily_pick_messages(refresh_fixtures: bool) -> tuple[list[str], list[
     all_picks.extend(best_picks)
 
     if settings.has_the_odds_api():
-        corners_picks = build_corners_picks(
-            limit=6,
-            days_ahead=2,
-            limit_per_league=2,
-            target_point=settings.corners_pick_point,
-            selection=settings.corners_pick_selection,
-        )
-        messages.append(build_market_message(corners_picks, settings.corners_pick_market_label()))
-        all_picks.extend(corners_picks)
+        try:
+            corners_picks = build_corners_picks(
+                limit=6,
+                days_ahead=2,
+                limit_per_league=2,
+                target_point=settings.corners_pick_point,
+                selection=settings.corners_pick_selection,
+            )
+        except httpx.HTTPError:
+            corners_picks = []
+        if corners_picks:
+            messages.append(build_market_message(corners_picks, settings.corners_pick_market_label()))
+            all_picks.extend(corners_picks)
 
     return messages, all_picks
 

@@ -1,6 +1,12 @@
 import pandas as pd
 
-from sports_ai_bot.evaluate.performance import _determine_outcome, _probability_bucket, _summarize_frame
+from sports_ai_bot.evaluate.performance import (
+    _determine_outcome,
+    _edge_bucket,
+    _odd_bucket,
+    _probability_bucket,
+    _summarize_frame,
+)
 
 
 def test_determine_outcome_for_over25() -> None:
@@ -23,11 +29,32 @@ def test_determine_outcome_for_btts() -> None:
     assert _determine_outcome("BTTS", 2, 0) == "lost"
 
 
+def test_determine_outcome_for_1x2() -> None:
+    assert _determine_outcome("1X2", 2, 1, "Local") == "won"
+    assert _determine_outcome("1X2", 1, 2, "Visitante") == "won"
+    assert _determine_outcome("1X2", 1, 1, "Empate") == "won"
+    assert _determine_outcome("1X2", 0, 1, "Local") == "lost"
+
+
 def test_probability_bucket_ranges() -> None:
     assert _probability_bucket(0.72) == "0.70+"
     assert _probability_bucket(0.67) == "0.65-0.69"
     assert _probability_bucket(0.61) == "0.60-0.64"
     assert _probability_bucket(0.55) == "<0.60"
+
+
+def test_odd_and_edge_bucket_ranges() -> None:
+    assert _odd_bucket(None) == "sin cuota"
+    assert _odd_bucket(1.45) == "<1.50"
+    assert _odd_bucket(1.75) == "1.50-1.79"
+    assert _odd_bucket(1.95) == "1.80-2.09"
+    assert _odd_bucket(2.25) == "2.10-2.49"
+    assert _odd_bucket(2.8) == "2.50+"
+    assert _edge_bucket(None) == "sin edge"
+    assert _edge_bucket(0.01) == "<2%"
+    assert _edge_bucket(0.03) == "2%-4.9%"
+    assert _edge_bucket(0.07) == "5%-9.9%"
+    assert _edge_bucket(0.12) == "10%+"
 
 
 def test_summarize_frame_includes_profit_and_roi() -> None:
@@ -46,3 +73,18 @@ def test_summarize_frame_includes_profit_and_roi() -> None:
     assert summary["total_profit"] == 0.0
     assert summary["roi"] == 0.0
     assert summary["yield"] == 0.0
+
+
+def test_summarize_frame_uses_stake_units_for_profit() -> None:
+    frame = pd.DataFrame(
+        [
+            {"status": "settled", "outcome": "won", "odd": 2.5, "stake_units": 2},
+            {"status": "settled", "outcome": "lost", "odd": 1.8, "stake_units": 3},
+        ]
+    )
+
+    summary = _summarize_frame(frame)
+
+    assert summary["risked_units"] == 5.0
+    assert summary["total_profit"] == 0.0
+    assert summary["roi"] == 0.0

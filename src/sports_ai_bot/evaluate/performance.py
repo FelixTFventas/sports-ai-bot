@@ -17,6 +17,8 @@ PICK_COLUMNS = [
     "match_label",
     "league",
     "market",
+    "selection",
+    "line",
     "probability",
     "confidence",
     "model_name",
@@ -26,6 +28,8 @@ PICK_COLUMNS = [
     "expected_value",
     "stake_units",
     "rating",
+    "score",
+    "is_experimental",
     "factors",
     "status",
     "outcome",
@@ -60,7 +64,7 @@ def settle_picks() -> dict[str, int]:
 def build_performance_report() -> dict[str, object]:
     settings = get_settings()
     settle_picks()
-    all_picks = _load_all_pick_files()
+    all_picks = _dedupe_picks(_load_all_pick_files())
     if all_picks.empty:
         report = {
             "summary": {
@@ -77,18 +81,29 @@ def build_performance_report() -> dict[str, object]:
             "by_market": {},
             "by_league": {},
             "by_probability_bucket": {},
+            "by_odd_bucket": {},
+            "by_edge_bucket": {},
+            "by_ev_bucket": {},
+            "by_rating": {},
+            "quality": {},
         }
         _write_report(report, settings.reports_dir / "performance_summary.json")
         return report
 
     settled = all_picks[all_picks["status"] == "settled"].copy()
-    settled["probability_bucket"] = settled["probability"].apply(_probability_bucket)
+    all_picks = _attach_analysis_buckets(all_picks)
+    settled = _attach_analysis_buckets(settled)
 
     report = {
         "summary": _summarize_frame(all_picks),
         "by_market": _group_summary(settled, "market"),
         "by_league": _group_summary(settled, "league"),
         "by_probability_bucket": _group_summary(settled, "probability_bucket"),
+        "by_odd_bucket": _group_summary(settled, "odd_bucket"),
+        "by_edge_bucket": _group_summary(settled, "edge_bucket"),
+        "by_ev_bucket": _group_summary(settled, "ev_bucket"),
+        "by_rating": _group_summary(settled, "rating"),
+        "quality": _quality_summary(all_picks),
     }
     _write_report(report, settings.reports_dir / "performance_summary.json")
     return report
@@ -118,6 +133,18 @@ def format_performance_message(report: dict[str, object]) -> str:
         lines.append("Por liga:")
         lines.extend(league_rows)
 
+    quality = report.get("quality", {})
+    if quality:
+        lines.append("Calidad de picks:")
+        lines.append(
+            f"Unicos: {quality['unique_picks']} | Duplicados ignorados: {quality['duplicate_rows']} | "
+            f"Cuota media: {quality['avg_odd']:.2f} | Edge medio: {quality['avg_edge']:.1%} | EV medio: {quality['avg_expected_value']:.1%}"
+        )
+        lines.append(
+            f"Con cuota: {quality['with_odds']} | Con value positivo: {quality['positive_ev']} | "
+            f"Pendientes: {quality['pending']}"
+        )
+
     return "\n".join(lines)
 
 
@@ -139,6 +166,25 @@ def _load_all_pick_files() -> pd.DataFrame:
     if not frames:
         return pd.DataFrame(columns=PICK_COLUMNS)
     return pd.concat(frames, ignore_index=True)
+
+
+def _dedupe_picks(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    key_columns = [
+        "prediction_date",
+        "match_date",
+        "home_team",
+        "away_team",
+        "league",
+        "market",
+        "selection",
+        "line",
+    ]
+    for column in key_columns:
+        if column not in frame.columns:
+            frame[column] = None
+    return frame.drop_duplicates(subset=key_columns, keep="first").copy()
 
 
 def _load_completed_results() -> pd.DataFrame:
@@ -219,7 +265,10 @@ def _settle_pick_frame(picks: pd.DataFrame, results: pd.DataFrame) -> pd.DataFra
 
     merged["outcome"] = merged.apply(
         lambda row: _determine_outcome(
-            row["market"], row["result_home_goals"], row["result_away_goals"]
+            row["market"],
+            row["result_home_goals"],
+            row["result_away_goals"],
+            row.get("selection"),
         ),
         axis=1,
     )
@@ -229,7 +278,12 @@ def _settle_pick_frame(picks: pd.DataFrame, results: pd.DataFrame) -> pd.DataFra
     return merged.reindex(columns=PICK_COLUMNS)
 
 
-def _determine_outcome(market: str, home_goals: float | None, away_goals: float | None) -> str:
+def _determine_outcome(
+    market: str,
+    home_goals: float | None,
+    away_goals: float | None,
+    selection: str | None = None,
+) -> str:
     if pd.isna(home_goals) or pd.isna(away_goals):
         return "pending"
     if market == "Over 2.5":
@@ -240,6 +294,14 @@ def _determine_outcome(market: str, home_goals: float | None, away_goals: float 
         return "won" if float(home_goals) + float(away_goals) < 4.5 else "lost"
     if market == "BTTS":
         return "won" if float(home_goals) > 0 and float(away_goals) > 0 else "lost"
+    if market == "1X2":
+        if float(home_goals) > float(away_goals):
+            result = "Local"
+        elif float(home_goals) < float(away_goals):
+            result = "Visitante"
+        else:
+            result = "Empate"
+        return "won" if selection == result else "lost"
     return "pending"
 
 
@@ -254,13 +316,70 @@ def _probability_bucket(probability: float) -> str:
     return "<0.60"
 
 
+def _odd_bucket(odd: float | None) -> str:
+    value = pd.to_numeric(odd, errors="coerce")
+    if pd.isna(value):
+        return "sin cuota"
+    value = float(value)
+    if value < 1.50:
+        return "<1.50"
+    if value < 1.80:
+        return "1.50-1.79"
+    if value < 2.10:
+        return "1.80-2.09"
+    if value < 2.50:
+        return "2.10-2.49"
+    return "2.50+"
+
+
+def _edge_bucket(edge: float | None) -> str:
+    value = pd.to_numeric(edge, errors="coerce")
+    if pd.isna(value):
+        return "sin edge"
+    value = float(value)
+    if value < 0.02:
+        return "<2%"
+    if value < 0.05:
+        return "2%-4.9%"
+    if value < 0.10:
+        return "5%-9.9%"
+    return "10%+"
+
+
+def _ev_bucket(expected_value: float | None) -> str:
+    value = pd.to_numeric(expected_value, errors="coerce")
+    if pd.isna(value):
+        return "sin EV"
+    value = float(value)
+    if value < 0.0:
+        return "negativo"
+    if value < 0.03:
+        return "0%-2.9%"
+    if value < 0.08:
+        return "3%-7.9%"
+    return "8%+"
+
+
+def _attach_analysis_buckets(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    working = frame.copy()
+    working["probability"] = pd.to_numeric(working["probability"], errors="coerce").fillna(0.0)
+    working["probability_bucket"] = working["probability"].apply(_probability_bucket)
+    working["odd_bucket"] = working["odd"].apply(_odd_bucket)
+    working["edge_bucket"] = working["edge"].apply(_edge_bucket)
+    working["ev_bucket"] = working["expected_value"].apply(_ev_bucket)
+    working["rating"] = working["rating"].fillna("sin rating")
+    return working
+
+
 def _summarize_frame(frame: pd.DataFrame) -> dict[str, object]:
     settled = frame[frame["status"] == "settled"]
     wins = int((settled["outcome"] == "won").sum())
     losses = int((settled["outcome"] == "lost").sum())
     total_settled = wins + losses
     total_profit = round(float(settled.apply(_profit_units, axis=1).sum()), 4) if not settled.empty else 0.0
-    risked_units = float(total_settled)
+    risked_units = round(float(settled.apply(_risk_units, axis=1).sum()), 4) if not settled.empty else 0.0
     return {
         "total": int(len(frame)),
         "settled": total_settled,
@@ -269,19 +388,51 @@ def _summarize_frame(frame: pd.DataFrame) -> dict[str, object]:
         "losses": losses,
         "hit_rate": round(wins / total_settled, 4) if total_settled else 0.0,
         "total_profit": total_profit,
+        "risked_units": risked_units,
         "roi": round(total_profit / risked_units, 4) if risked_units else 0.0,
         "yield": round(total_profit / risked_units, 4) if risked_units else 0.0,
     }
 
 
+def _risk_units(row: pd.Series) -> float:
+    stake = pd.to_numeric(row.get("stake_units"), errors="coerce")
+    if pd.isna(stake) or float(stake) <= 0:
+        return 1.0
+    return float(stake)
+
+
 def _profit_units(row: pd.Series) -> float:
     outcome = row.get("outcome")
     odd = pd.to_numeric(row.get("odd"), errors="coerce")
+    stake = _risk_units(row)
     if outcome == "won":
-        return float(odd - 1.0) if pd.notna(odd) and float(odd) > 1.0 else 1.0
+        return stake * float(odd - 1.0) if pd.notna(odd) and float(odd) > 1.0 else stake
     if outcome == "lost":
-        return -1.0
+        return -stake
     return 0.0
+
+
+def _quality_summary(frame: pd.DataFrame) -> dict[str, object]:
+    raw = _load_all_pick_files()
+    unique_count = int(len(frame))
+    duplicate_rows = max(0, int(len(raw) - unique_count))
+    odd = pd.to_numeric(frame["odd"], errors="coerce")
+    edge = pd.to_numeric(frame["edge"], errors="coerce")
+    expected_value = pd.to_numeric(frame["expected_value"], errors="coerce")
+    return {
+        "total_rows": int(len(raw)),
+        "unique_picks": unique_count,
+        "duplicate_rows": duplicate_rows,
+        "pending": int((frame["status"] == "pending").sum()),
+        "settled": int((frame["status"] == "settled").sum()),
+        "with_odds": int(odd.notna().sum()),
+        "positive_ev": int((expected_value > 0).sum()),
+        "avg_odd": round(float(odd.mean()), 4) if odd.notna().any() else 0.0,
+        "avg_edge": round(float(edge.mean()), 4) if edge.notna().any() else 0.0,
+        "avg_expected_value": round(float(expected_value.mean()), 4)
+        if expected_value.notna().any()
+        else 0.0,
+    }
 
 
 def _group_summary(frame: pd.DataFrame, column: str) -> dict[str, dict[str, object]]:
