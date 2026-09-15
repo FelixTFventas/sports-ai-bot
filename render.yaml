@@ -4,6 +4,11 @@ services:
     runtime: python
     buildCommand: pip install -e .
     startCommand: python -m sports_ai_bot.main run-bot
+    # Persistent disks may incur charges. Local use does not require Render.
+    disk:
+      name: sports-ai-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: DATA_DIR
         value: /var/data
@@ -31,5 +36,9 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+      - key: TELEGRAM_ADMIN_IDS
+        sync: false
+      - key: HISTORICAL_DOWNLOAD_AUTHORIZED
+        value: "false"
       - key: THE_ODDS_API_KEY
         sync: false

@@ -1,30 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import logging
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import httpx
 from telegram import Bot, Update
-from telegram.error import TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.request import HTTPXRequest
 
 from sports_ai_bot.evaluate.performance import build_performance_report, format_performance_message
 from sports_ai_bot.explain.messages import (
     build_best_message,
-    build_forebet_value_message,
     build_market_message,
     build_prediction_message,
     build_value_message,
 )
 from sports_ai_bot.external.forebet import (
     ForebetError,
-    fetch_48h_value_picks,
-    fetch_match_value_picks,
-    fetch_top_picks,
-    format_top_picks_message,
+    format_forebet_message,
+    get_forebet_predictions,
 )
-from sports_ai_bot.research.corners import build_corners_picks
 from sports_ai_bot.predict.pipeline import (
     Pick,
     build_best_picks,
@@ -34,212 +31,267 @@ from sports_ai_bot.predict.pipeline import (
     persist_picks,
 )
 from sports_ai_bot.utils.config import get_settings
+from sports_ai_bot.predict.service import (
+    generate_picks,
+    cached_picks,
+    format_picks,
+    format_quotes,
+    status_message,
+)
+from sports_ai_bot.storage import Store
+from sports_ai_bot.bot.publication import (
+    Publication,
+    PublicationBlocked,
+    PublicationBusy,
+    shared_work,
+)
 
 
-def _safe_message(message: str) -> str:
-    return message[:4000]
+logger = logging.getLogger(__name__)
+DAILY_BUSY_RETRIES = 60
+DAILY_BUSY_DELAY = 5
+
+
+def split_message(message: str) -> list[str]:
+    chunks = []
+    while message:
+        units = 0
+        end = 0
+        for char in message:
+            size = 2 if ord(char) > 0xFFFF else 1
+            if units + size > 4000:
+                break
+            units += size
+            end += 1
+        if end < len(message):
+            paragraph = message.rfind("\n\n", 0, end)
+            line = message.rfind("\n", 0, end)
+            if paragraph >= 0:
+                end = paragraph + 2
+            elif line >= 0:
+                end = line + 1
+        chunks.append(message[:end])
+        message = message[end:]
+    return chunks
+
+
+async def _reply(update: Update, message: str) -> None:
+    target = getattr(update, "effective_message", None) or getattr(update, "message", None)
+    if target is not None:
+        for chunk in split_message(message):
+            await target.reply_text(chunk)
+
+
+async def _work(function, *args, **kwargs):
+    def run():
+        with shared_work(get_settings().data_dir):
+            return function(*args, **kwargs)
+
+    return await asyncio.to_thread(run)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "Bot listo. Usa /today, /over15, /over, /btts, /corners, /top, /forebettop, /forebetvalue, /forebet48h, /publishnow o /help."
-    )
+    await help_command(update, context)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = get_settings()
-    await update.message.reply_text(
+    user = getattr(update, "effective_user", None)
+    publish_help = (
+        "/publishnow - publica ahora en el chat configurado (solo administradores)\n"
+        if user is not None and user.id in settings.telegram_admin_ids_set()
+        else ""
+    )
+    await _reply(
+        update,
         "Comandos disponibles:\n"
-        "/today - picks del dia\n"
-        "/over15 - picks Over 1.5\n"
-        "/over - picks Over 2.5\n"
-        "/under45 - picks Under 4.5\n"
-        "/btts - picks Ambos marcan\n"
-        f"/corners - picks experimentales {settings.corners_pick_market_label()}\n"
-        "/top - mejores picks disponibles\n"
-        "/forebettop - top 5 publicados por Forebet\n"
-        "/forebetvalue [url] - analiza value Forebet; sin url usa proximas 48h\n"
-        "/forebet48h - value Forebet de partidos en proximas 48h\n"
-        "/value - value picks con edge positivo\n"
-        "/best - picks premium mas fuertes\n"
-        "/publishnow - publica ahora en el chat configurado\n"
-        "/performance - estado de rendimiento"
+        "/picks - analisis local vigente en cache\n"
+        "/cuotas - cuotas importadas manualmente, sin actualizacion automatica de casas\n"
+        "/forebet - consulta privada y manual de pronosticos Forebet experimentales\n"
+        "/rendimiento - estado de rendimiento\n"
+        f"{publish_help}"
+        "/help - ayuda\n"
+        "/start - inicio",
+    )
+
+
+async def picks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    picks = await _work(cached_picks)
+    message = format_picks(picks) if picks else await _work(status_message)
+    await _reply(update, message)
+
+
+async def cuotas_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _reply(update, await _work(format_quotes))
+
+
+async def experimental_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _reply(
+        update,
+        "Desactivado: contenido experimental de referencia, no una prediccion validada. "
+        "No se consultan fuentes externas. Usa /picks.",
     )
 
 
 async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    picks = build_top_picks()
+    picks = await _work(build_top_picks)
     message = build_prediction_message(picks)
-    await update.message.reply_text(_safe_message(message))
+    await _reply(update, message)
 
 
 async def over_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    picks = build_market_picks("Over 2.5", limit=10, threshold=0.60)
+    picks = await _work(build_market_picks, "Over 2.5", limit=10, threshold=0.60)
     message = build_market_message(picks, "Over 2.5")
-    await update.message.reply_text(_safe_message(message))
+    await _reply(update, message)
 
 
 async def over15_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    picks = build_market_picks("Over 1.5", limit=10, threshold=0.65)
+    picks = await _work(build_market_picks, "Over 1.5", limit=10, threshold=0.65)
     message = build_market_message(picks, "Over 1.5")
-    await update.message.reply_text(_safe_message(message))
+    await _reply(update, message)
 
 
 async def btts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    picks = build_market_picks("BTTS", limit=10, threshold=0.60)
+    picks = await _work(build_market_picks, "BTTS", limit=10, threshold=0.60)
     message = build_market_message(picks, "BTTS")
-    await update.message.reply_text(_safe_message(message))
+    await _reply(update, message)
 
 
 async def under45_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    picks = build_market_picks("Under 4.5", limit=10, threshold=0.72)
+    picks = await _work(build_market_picks, "Under 4.5", limit=10, threshold=0.72)
     message = build_market_message(picks, "Under 4.5")
-    await update.message.reply_text(_safe_message(message))
+    await _reply(update, message)
 
 
 async def corners_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    settings = get_settings()
-    picks = build_corners_picks(
-        limit=6,
-        days_ahead=2,
-        limit_per_league=2,
-        target_point=settings.corners_pick_point,
-        selection=settings.corners_pick_selection,
-    )
-    persist_picks(picks)
-    message = build_market_message(picks, settings.corners_pick_market_label())
-    await update.message.reply_text(_safe_message(message))
+    await experimental_command(update, context)
 
 
 async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    picks = build_top_picks(limit=10, threshold=0.60)
+    picks = await _work(build_top_picks, limit=10, threshold=0.60)
     message = build_prediction_message(picks)
-    await update.message.reply_text(_safe_message(message))
+    await _reply(update, message)
 
 
-async def forebet_top_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def forebet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = get_settings()
     try:
-        picks = fetch_top_picks(limit=5)
-    except (ForebetError, httpx.HTTPError):
-        await update.message.reply_text(
-            "No se pudieron obtener las top predicciones de Forebet hoy."
+        result = await asyncio.to_thread(
+            get_forebet_predictions,
+            settings.data_dir,
+            timezone_name=settings.bot_timezone,
+            cache_minutes=settings.forebet_cache_minutes,
+            min_probability=settings.forebet_min_probability,
+            limit=settings.forebet_limit,
+            browser_executable=settings.forebet_browser_executable,
+        )
+    except ForebetError as exc:
+        logger.warning("Consulta Forebet no disponible: %s", exc)
+        await _reply(
+            update,
+            "No se pudo consultar Forebet con el navegador local. "
+            "Comprueba que Chrome o Edge esten disponibles e intentalo de nuevo.",
         )
         return
-
-    await update.message.reply_text(_safe_message(format_top_picks_message(picks)))
-
-
-async def forebet_value_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    args = getattr(context, "args", []) if context is not None else []
-    try:
-        if args:
-            picks = fetch_match_value_picks(args[0], limit=5, min_odd=1.50)
-        else:
-            picks = fetch_48h_value_picks(limit_matches=30, limit=10, min_odd=1.50)
-    except (ForebetError, httpx.HTTPError):
-        await update.message.reply_text("No se pudieron analizar value picks de Forebet.")
-        return
-
-    await update.message.reply_text(_safe_message(build_forebet_value_message(picks)))
-
-
-async def forebet_48h_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    try:
-        picks = fetch_48h_value_picks(limit_matches=30, limit=10, min_odd=1.50)
-    except (ForebetError, httpx.HTTPError):
-        await update.message.reply_text("No se pudieron analizar value picks Forebet de 48h.")
-        return
-
-    await update.message.reply_text(_safe_message(build_forebet_value_message(picks)))
+    await _reply(update, format_forebet_message(result, settings.bot_timezone))
 
 
 async def value_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    picks = build_value_picks(limit=5)
+    picks = await _work(build_value_picks, limit=5)
     message = build_value_message(picks)
-    await update.message.reply_text(_safe_message(message))
+    await _reply(update, message)
 
 
 async def best_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    picks = build_best_picks(limit=5)
+    picks = await _work(build_best_picks, limit=5)
     message = build_best_message(picks)
-    await update.message.reply_text(_safe_message(message))
+    await _reply(update, message)
 
 
 async def performance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    report = build_performance_report()
-    await update.message.reply_text(_safe_message(format_performance_message(report)))
+    report = await _work(build_performance_report)
+    await _reply(update, format_performance_message(report))
 
 
 async def publishnow_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await publish_daily_picks(context)
-    await update.message.reply_text("Publicacion manual enviada al chat configurado.")
-
-
-async def _send_daily_picks(bot: Bot, chat_id: str, refresh_fixtures: bool) -> str:
-    messages, picks = _build_daily_pick_messages(refresh_fixtures=refresh_fixtures)
-    persist_picks(picks)
-    for message in messages:
-        await _send_message_with_retry(bot, chat_id=chat_id, text=_safe_message(message))
-    return "\n\n".join(messages)
-
-
-async def _send_message_with_retry(bot: Bot, chat_id: str, text: str) -> None:
+    settings = get_settings()
+    user = getattr(update, "effective_user", None)
+    if user is None or user.id not in settings.telegram_admin_ids_set():
+        await _reply(update, "No autorizado para publicar.")
+        return
     try:
-        await bot.send_message(chat_id=chat_id, text=text)
-    except TimedOut:
-        await asyncio.sleep(2)
-        await bot.send_message(chat_id=chat_id, text=text)
+        await _send_daily_picks(context.bot, settings.telegram_chat_id, False, kind="manual")
+    except PublicationBlocked as exc:
+        await _reply(update, str(exc))
+        return
+    await _reply(update, "Publicacion manual enviada al chat configurado.")
+
+
+async def _send_daily_picks(
+    bot: Bot, chat_id: str, refresh_fixtures: bool, *, kind: str = "daily"
+) -> str:
+    settings = get_settings()
+    publication = Publication(
+        settings.data_dir,
+        chat_id,
+        kind,
+        datetime.now(ZoneInfo(settings.bot_timezone)).date().isoformat(),
+    )
+
+    # Shield the worker's lifetime: cancellation must not release its gate while
+    # a to_thread operation is still preparing or recording this batch.
+    async def run():
+        await asyncio.to_thread(publication.start)
+        send_started = False
+        try:
+
+            def build():
+                messages, picks = _build_daily_pick_messages(refresh_fixtures)
+                persist_picks(picks)
+                return messages, picks
+
+            messages, picks = await _work(build)
+            text = "\n\n".join(messages)
+            await asyncio.to_thread(publication.prepare, hashlib.sha256(text.encode()).hexdigest())
+            for message in messages:
+                for chunk in split_message(message):
+                    # TimedOut is uncertain delivery, never an automatic retry.
+                    send_started = True
+                    await bot.send_message(chat_id=chat_id, text=chunk)
+            published_picks = [
+                pick for pick in picks
+                if getattr(pick, "quote_id", None) and getattr(pick, "model_version", None)
+            ]
+            if published_picks:
+                def mark_published():
+                    Store(settings.data_dir).mark_published(published_picks)
+
+                await _work(mark_published)
+            await asyncio.to_thread(publication.finish, "completed")
+            return text
+        except BaseException:
+            await asyncio.to_thread(
+                publication.finish,
+                "failed-uncertain" if send_started else "failed-before-send",
+            )
+            raise
+        finally:
+            publication.close()
+
+    task = asyncio.create_task(run())
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        try:
+            await task
+        finally:
+            raise
 
 
 def _build_daily_pick_messages(refresh_fixtures: bool) -> tuple[list[str], list[Pick]]:
-    settings = get_settings()
-    messages: list[str] = []
-    all_picks: list[Pick] = []
-
-    candidate_picks = build_top_picks(
-        limit=120,
-        threshold=0.50,
-        refresh_fixtures=refresh_fixtures,
-    )
-    top_picks = candidate_picks[:20]
-    messages.append(build_prediction_message(top_picks))
-    all_picks.extend(top_picks)
-
-    market_specs = [
-        ("Over 1.5", 10, 0.65),
-        ("Over 2.5", 10, 0.60),
-        ("Under 4.5", 10, 0.72),
-        ("BTTS", 10, 0.60),
-    ]
-    for market, limit, threshold in market_specs:
-        picks = _filter_market_picks(candidate_picks, market, limit=limit, threshold=threshold)
-        messages.append(build_market_message(picks, market))
-        all_picks.extend(picks)
-
-    value_picks = _filter_value_picks(candidate_picks, limit=10)
-    messages.append(build_value_message(value_picks))
-    all_picks.extend(value_picks)
-
-    best_picks = _filter_best_picks(candidate_picks, limit=5)
-    messages.append(build_best_message(best_picks))
-    all_picks.extend(best_picks)
-
-    if settings.has_the_odds_api():
-        try:
-            corners_picks = build_corners_picks(
-                limit=6,
-                days_ahead=2,
-                limit_per_league=2,
-                target_point=settings.corners_pick_point,
-                selection=settings.corners_pick_selection,
-            )
-        except httpx.HTTPError:
-            corners_picks = []
-        if corners_picks:
-            messages.append(build_market_message(corners_picks, settings.corners_pick_market_label()))
-            all_picks.extend(corners_picks)
-
-    return messages, all_picks
+    # The legacy refresh flag must never trigger a network refresh.
+    picks = generate_picks()
+    return [format_picks(picks) if picks else status_message()], picks
 
 
 def _filter_market_picks(
@@ -284,16 +336,36 @@ def _pick_message_score(pick: Pick) -> tuple[float, float, float]:
 
 async def publish_daily_picks(context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = get_settings()
-    await _send_daily_picks(
-        context.bot,
-        chat_id=settings.telegram_chat_id,
-        refresh_fixtures=False,
-    )
+    for attempt in range(DAILY_BUSY_RETRIES + 1):
+        try:
+            await _send_daily_picks(
+                context.bot,
+                chat_id=settings.telegram_chat_id,
+                refresh_fixtures=False,
+            )
+            return
+        except PublicationBusy:
+            if attempt == DAILY_BUSY_RETRIES:
+                raise
+            await asyncio.sleep(DAILY_BUSY_DELAY)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    error = context.error
+    logger.error(
+        "Error procesando solicitud o job de Telegram",
+        exc_info=(type(error), error, error.__traceback__),
+    )
     if isinstance(update, Update) and update.effective_message:
-        await update.effective_message.reply_text("Hubo un error procesando la solicitud.")
+        await _reply(
+            update,
+            "Hubo un error procesando la solicitud; si hubo un envio, "
+            "su estado puede ser incierto y no se reintentara automaticamente.",
+        )
+
+
+async def refresh_analysis(context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _work(generate_picks)
 
 
 def _build_application() -> Application:
@@ -305,18 +377,14 @@ def _build_application() -> Application:
     application = Application.builder().token(settings.telegram_bot_token).build()
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("today", today_command))
-    application.add_handler(CommandHandler("over15", over15_command))
-    application.add_handler(CommandHandler("over", over_command))
-    application.add_handler(CommandHandler("under45", under45_command))
-    application.add_handler(CommandHandler("btts", btts_command))
+    application.add_handler(CommandHandler("picks", picks_command))
+    application.add_handler(CommandHandler("cuotas", cuotas_command))
+    application.add_handler(CommandHandler("rendimiento", performance_command))
+    for alias in ("today", "top", "value", "best", "over", "btts", "over15", "under45"):
+        application.add_handler(CommandHandler(alias, picks_command))
     application.add_handler(CommandHandler("corners", corners_command))
-    application.add_handler(CommandHandler("top", top_command))
-    application.add_handler(CommandHandler("forebettop", forebet_top_command))
-    application.add_handler(CommandHandler("forebetvalue", forebet_value_command))
-    application.add_handler(CommandHandler("forebet48h", forebet_48h_command))
-    application.add_handler(CommandHandler("value", value_command))
-    application.add_handler(CommandHandler("best", best_command))
+    for alias in ("forebet", "forebettop", "forebetvalue", "forebet48h"):
+        application.add_handler(CommandHandler(alias, forebet_command))
     application.add_handler(CommandHandler("publishnow", publishnow_command))
     application.add_handler(CommandHandler("performance", performance_command))
     application.add_error_handler(error_handler)
@@ -326,6 +394,9 @@ def _build_application() -> Application:
         publish_daily_picks,
         time=_local_time(int(hour), int(minute), settings.bot_timezone),
         name="daily-picks",
+    )
+    application.job_queue.run_repeating(
+        refresh_analysis, interval=15 * 60, first=10, name="refresh_analysis",
     )
     return application
 

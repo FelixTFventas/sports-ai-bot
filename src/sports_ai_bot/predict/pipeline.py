@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import json
 
 import joblib
@@ -40,6 +41,14 @@ class Pick:
     bookmaker: str | None = None
     score: float | None = None
     is_experimental: bool = False
+    event_id: str | None = None
+    quote_id: str | None = None
+    kickoff: str | None = None
+    quoted_at: str | None = None
+    source_url: str | None = None
+    source: str | None = None
+    model_version: str | None = None
+    generated_at: str | None = None
 
 
 def _confidence_label(probability: float) -> str:
@@ -162,11 +171,14 @@ def build_market_picks(
 
 def persist_picks(picks: list[Pick]) -> pd.DataFrame:
     settings = get_settings()
+    prediction_day = datetime.now(ZoneInfo("America/Bogota")).date().isoformat()
+    if not picks:
+        return pd.DataFrame()
     settings.predictions_dir.mkdir(parents=True, exist_ok=True)
     frame = pd.DataFrame(
         [
             {
-                "prediction_date": date.today().isoformat(),
+                "prediction_date": prediction_day,
                 "match_date": pick.match_date,
                 "home_team": pick.home_team,
                 "away_team": pick.away_team,
@@ -178,6 +190,15 @@ def persist_picks(picks: list[Pick]) -> pd.DataFrame:
                 "probability": round(pick.probability, 4),
                 "confidence": pick.confidence,
                 "model_name": pick.model_name,
+                "model_version": pick.model_version,
+                "event_id": pick.event_id,
+                "quote_id": pick.quote_id,
+                "kickoff": pick.kickoff,
+                "quoted_at": pick.quoted_at,
+                "source_url": pick.source_url,
+                "source": pick.source,
+                "generated_at": pick.generated_at,
+                "bookmaker": pick.bookmaker,
                 "odd": round(pick.odd, 4) if pick.odd is not None else None,
                 "implied_probability": round(pick.implied_probability, 4)
                 if pick.implied_probability is not None
@@ -199,7 +220,7 @@ def persist_picks(picks: list[Pick]) -> pd.DataFrame:
             for pick in picks
         ]
     )
-    output_file = settings.predictions_dir / f"picks_{date.today().isoformat()}.csv"
+    output_file = settings.predictions_dir / f"picks_{prediction_day}.csv"
     if output_file.exists():
         try:
             existing = pd.read_csv(output_file)
@@ -207,6 +228,9 @@ def persist_picks(picks: list[Pick]) -> pd.DataFrame:
             existing = pd.DataFrame()
         if not existing.empty:
             frame = pd.concat([existing, frame], ignore_index=True)
+            for column in ("model_version", "is_experimental"):
+                if column not in frame:
+                    frame[column] = None
             frame = frame.drop_duplicates(
                 subset=[
                     "prediction_date",
@@ -217,6 +241,8 @@ def persist_picks(picks: list[Pick]) -> pd.DataFrame:
                     "market",
                     "selection",
                     "line",
+                    "model_version",
+                    "is_experimental",
                 ],
                 keep="first",
             )

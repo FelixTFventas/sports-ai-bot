@@ -284,16 +284,37 @@ def _extract_event_odds(payload: dict[str, object], league_name: str) -> list[di
     return rows
 
 
-def _extract_over25_decimal(odds_payload: list[dict[str, object]]) -> float | None:
+def _extract_over25_decimal(odds_payload: object) -> float | None:
+    if not isinstance(odds_payload, list):
+        return None
     for entry in odds_payload:
         if not isinstance(entry, dict):
             continue
-        total = entry.get("total", {})
-        over = total.get("over", {})
-        american = over.get("close", {}).get("odds") or over.get("open", {}).get("odds")
-        decimal = _american_to_decimal(american)
-        if decimal is not None:
-            return decimal
+        total = entry.get("total")
+        if not isinstance(total, dict):
+            continue
+        over = total.get("over")
+        if not isinstance(over, dict):
+            continue
+        for snapshot_name in ("close", "open"):
+            snapshot = over.get(snapshot_name)
+            if not isinstance(snapshot, dict):
+                continue
+            # The line and price must belong to the same snapshot.
+            line = snapshot.get("line")
+            if isinstance(line, bool) or not isinstance(line, (str, int, float)):
+                continue
+            try:
+                if float(line) != 2.5:
+                    continue
+            except ValueError:
+                continue
+            american = snapshot.get("odds")
+            if isinstance(american, bool) or not isinstance(american, (str, int, float)):
+                continue
+            decimal = _american_to_decimal(american)
+            if decimal is not None:
+                return decimal
     return None
 
 

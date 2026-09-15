@@ -15,6 +15,7 @@ REQUIRED_COLUMNS = ["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]
 ELO_BASE = 1500.0
 ELO_K = 20.0
 WINDOW = 5
+DATA_SCHEMA_VERSION = "features-v2"
 
 
 @dataclass
@@ -24,6 +25,13 @@ class TeamState:
     away_history: list[dict[str, float]] = field(default_factory=list)
     elo: float = ELO_BASE
     last_match_date: pd.Timestamp | None = None
+
+
+def _parse_source_dates(values: pd.Series) -> pd.Series:
+    iso = values.astype(str).str.match(r"^\d{4}-\d{2}-\d{2}")
+    dates = pd.to_datetime(values.where(~iso), dayfirst=True, format="mixed", errors="coerce", utc=True)
+    dates.loc[iso] = pd.to_datetime(values.loc[iso], format="ISO8601", errors="coerce", utc=True)
+    return dates.dt.tz_convert(None)
 
 
 def _load_raw_csv(file_path: Path) -> pd.DataFrame:
@@ -40,7 +48,7 @@ def _load_raw_csv(file_path: Path) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Faltan columnas requeridas en {file_path.name}: {missing}")
     frame = frame.copy()
-    frame["Date"] = pd.to_datetime(frame["Date"], dayfirst=True, errors="coerce")
+    frame["Date"] = _parse_source_dates(frame["Date"])
     frame = frame.dropna(subset=["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"])
     frame["FTHG"] = pd.to_numeric(frame["FTHG"], errors="coerce")
     frame["FTAG"] = pd.to_numeric(frame["FTAG"], errors="coerce")
@@ -66,7 +74,7 @@ def _load_fixture_csv(file_path: Path) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Faltan columnas requeridas en {file_path.name}: {missing}")
     frame = frame.copy()
-    frame["Date"] = pd.to_datetime(frame["Date"], dayfirst=True, errors="coerce")
+    frame["Date"] = _parse_source_dates(frame["Date"])
     frame["FTHG"] = pd.to_numeric(frame.get("FTHG"), errors="coerce")
     frame["FTAG"] = pd.to_numeric(frame.get("FTAG"), errors="coerce")
     frame = frame.dropna(subset=["Date", "HomeTeam", "AwayTeam"])
@@ -77,6 +85,8 @@ def _rolling_avg(history: list[dict[str, float]], key: str, window: int = WINDOW
     if len(history) < window:
         return None
     sample = history[-window:]
+    if any(pd.isna(item[key]) for item in sample):
+        return None
     return sum(item[key] for item in sample) / window
 
 
@@ -132,7 +142,7 @@ def _build_feature_row(
     away_away_corners_for_avg_5 = _rolling_avg(away_state.away_history, "corners_for")
     away_away_corners_against_avg_5 = _rolling_avg(away_state.away_history, "corners_against")
 
-    return {
+    row = {
         "Date": match_date,
         "League": league,
         "HomeTeam": home_team,
@@ -193,6 +203,28 @@ def _build_feature_row(
         else (home_goals_for_avg_5 - home_goals_against_avg_5)
         - (away_goals_for_avg_5 - away_goals_against_avg_5),
     }
+    dates = [state.last_match_date for state in (home_state, away_state) if state.last_match_date is not None]
+    row["history_as_of"] = max(dates) if dates else None
+    row["data_schema_version"] = DATA_SCHEMA_VERSION
+    for side, state, venue_history in (
+        ("home", home_state, home_state.home_history),
+        ("away", away_state, away_state.away_history),
+    ):
+        row[f"quality_{side}_history_matches"] = len(state.overall_history)
+        row[f"quality_{side}_venue_matches"] = len(venue_history)
+        row[f"quality_{side}_corners_observed_5"] = sum(
+            pd.notna(item["corners_for"]) and pd.notna(item["corners_against"])
+            for item in state.overall_history[-WINDOW:]
+        )
+    feature_values = [value for key, value in row.items() if key.startswith(("home_", "away_", "elo_")) or key in (
+        "attack_diff", "defense_diff", "corners_balance_diff", "corners_total_avg_5", "form_diff", "goal_balance_diff"
+    )]
+    row["quality_missing_features"] = sum(pd.isna(value) for value in feature_values)
+    row["quality_history_ready"] = all(
+        row[f"quality_{side}_{kind}_matches"] >= WINDOW
+        for side in ("home", "away") for kind in ("history", "venue")
+    )
+    return row
 
 
 def _expected_score(home_elo: float, away_elo: float) -> float:
@@ -218,8 +250,8 @@ def _update_team_states(
     over25 = float(total_goals > 2.5)
     over15 = float(total_goals > 1.5)
     btts = float(home_goals > 0 and away_goals > 0)
-    home_corners_value = float(home_corners) if home_corners is not None else 0.0
-    away_corners_value = float(away_corners) if away_corners is not None else 0.0
+    home_corners_value = float(home_corners) if home_corners is not None else float("nan")
+    away_corners_value = float(away_corners) if away_corners is not None else float("nan")
 
     home_record = {
         "goals_for": float(home_goals),
@@ -260,7 +292,7 @@ def _update_team_states(
 
 def _build_state_from_completed_matches(matches: pd.DataFrame) -> dict[str, TeamState]:
     states: dict[str, TeamState] = {}
-    completed = matches.dropna(subset=["FTHG", "FTAG"]).sort_values("Date")
+    completed = _deduplicate_matches(matches).dropna(subset=["FTHG", "FTAG"]).sort_values("Date")
     for match in completed.itertuples(index=False):
         _update_team_states(
             states,
@@ -277,34 +309,47 @@ def _build_state_from_completed_matches(matches: pd.DataFrame) -> dict[str, Team
 
 def _attach_team_history_features(matches: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
-    states: dict[str, TeamState] = {}
+    matches = _deduplicate_matches(matches).dropna(subset=["FTHG", "FTAG"])
+    for league, league_matches in matches.groupby("League", sort=True):
+        states: dict[str, TeamState] = {}
+        # Date-only sources cannot establish result availability within a day.
+        for _, day_matches in league_matches.groupby(league_matches["Date"].dt.normalize(), sort=True):
+            for match in day_matches.itertuples(index=False):
+                row = _build_feature_row(league, match.Date, match.HomeTeam, match.AwayTeam, states)
+                row["target_over15"] = int((match.FTHG + match.FTAG) > 1.5)
+                row["target_over25"] = int((match.FTHG + match.FTAG) > 2.5)
+                row["target_under45"] = int((match.FTHG + match.FTAG) < 4.5)
+                row["target_btts"] = int(match.FTHG > 0 and match.FTAG > 0)
+                row["target_home_win"] = int(match.FTHG > match.FTAG)
+                row["target_draw"] = int(match.FTHG == match.FTAG)
+                row["target_away_win"] = int(match.FTHG < match.FTAG)
+                total_corners = _total_corners(match)
+                row["target_corners_over95"] = int(total_corners > 9.5) if total_corners is not None else None
+                rows.append(row)
+            for match in day_matches.sort_values("Date").itertuples(index=False):
+                _update_team_states(states, match.Date, match.HomeTeam, match.AwayTeam,
+                                    float(match.FTHG), float(match.FTAG),
+                                    _match_value(match, "HC"), _match_value(match, "AC"))
+    return pd.DataFrame(rows).sort_values("Date").reset_index(drop=True) if rows else pd.DataFrame()
 
-    for match in matches.sort_values("Date").itertuples(index=False):
-        row = _build_feature_row(match.League, match.Date, match.HomeTeam, match.AwayTeam, states)
-        row["target_over15"] = int((match.FTHG + match.FTAG) > 1.5)
-        row["target_over25"] = int((match.FTHG + match.FTAG) > 2.5)
-        row["target_under45"] = int((match.FTHG + match.FTAG) < 4.5)
-        row["target_btts"] = int(match.FTHG > 0 and match.FTAG > 0)
-        row["target_home_win"] = int(match.FTHG > match.FTAG)
-        row["target_draw"] = int(match.FTHG == match.FTAG)
-        row["target_away_win"] = int(match.FTHG < match.FTAG)
-        total_corners = _total_corners(match)
-        row["target_corners_over95"] = int(total_corners > 9.5) if total_corners is not None else None
-        rows.append(row)
-        _update_team_states(
-            states,
-            match.Date,
-            match.HomeTeam,
-            match.AwayTeam,
-            float(match.FTHG),
-            float(match.FTAG),
-            _match_value(match, "HC"),
-            _match_value(match, "AC"),
-        )
 
-    dataset = pd.DataFrame(rows)
-    dataset = dataset.dropna()
-    return dataset
+def _deduplicate_matches(matches: pd.DataFrame) -> pd.DataFrame:
+    matches = matches.copy()
+    matches["Date"] = pd.to_datetime(matches["Date"], errors="coerce", utc=True).dt.tz_convert(None)
+    for column in ("HomeTeam", "AwayTeam"):
+        matches[column] = [canonical_team_name(league, team) or team
+                           for league, team in zip(matches["League"], matches[column])]
+    for column in ("FTHG", "FTAG", "HC", "AC"):
+        if column in matches:
+            values = pd.to_numeric(matches[column], errors="coerce")
+            matches[column] = values.where(values.ge(0) & values.mod(1).eq(0))
+    matches = matches.dropna(subset=["Date", "League", "HomeTeam", "AwayTeam"])
+    # Prefer the most complete record; ties use the last source in sorted file order.
+    matches["_completeness"] = matches.reindex(columns=["FTHG", "FTAG", "HC", "AC"]).notna().sum(axis=1)
+    matches["_match_day"] = matches["Date"].dt.normalize()
+    return (matches.sort_values("_completeness", kind="stable")
+            .drop_duplicates(["League", "_match_day", "HomeTeam", "AwayTeam"], keep="last")
+            .drop(columns=["_completeness", "_match_day"]).sort_values("Date", kind="stable"))
 
 
 def _match_value(match: object, attribute: str) -> float | None:
@@ -364,8 +409,7 @@ def build_fixture_features() -> pd.DataFrame:
     if not historical_frames:
         raise FileNotFoundError("No hay historicos completos para generar features de fixtures")
 
-    completed_matches = pd.concat(historical_frames, ignore_index=True)
-    states = _build_state_from_completed_matches(completed_matches)
+    completed_matches = _deduplicate_matches(pd.concat(historical_frames, ignore_index=True))
 
     all_fixtures = pd.concat(fixture_frames, ignore_index=True)
     source_upcoming = all_fixtures[
@@ -386,6 +430,12 @@ def build_fixture_features() -> pd.DataFrame:
 
     rows: list[dict[str, object]] = []
     for fixture in upcoming.sort_values("Date").itertuples(index=False):
+        cutoff = min(pd.to_datetime(fixture.Date, utc=True).tz_localize(None).normalize(),
+                     pd.Timestamp.now(tz="UTC").tz_localize(None).normalize())
+        history = completed_matches[
+            (completed_matches["League"] == fixture.League) & (completed_matches["Date"] < cutoff)
+        ]
+        states = _build_state_from_completed_matches(history)
         home_team = canonical_team_name(fixture.League, fixture.HomeTeam) or fixture.HomeTeam
         away_team = canonical_team_name(fixture.League, fixture.AwayTeam) or fixture.AwayTeam
         row = _build_feature_row(fixture.League, fixture.Date, home_team, away_team, states)
@@ -393,7 +443,6 @@ def build_fixture_features() -> pd.DataFrame:
         rows.append(row)
 
     fixtures = pd.DataFrame(rows)
-    fixtures = fixtures.dropna()
     output_file = settings.processed_dir / "fixture_features.csv"
     output_file.parent.mkdir(parents=True, exist_ok=True)
     fixtures.to_csv(output_file, index=False)

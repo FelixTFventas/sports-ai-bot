@@ -25,6 +25,7 @@ LEAGUES = {
     "BRA": "serie_a_brasil",
     "MEX": "liga_mx",
     "USA": "mls",
+    "COL": "liga_colombia",
 }
 
 BASE_URL = "https://www.football-data.co.uk/mmz4281"
@@ -70,12 +71,20 @@ def _download_csv(client: httpx.Client, season: str, league_code: str, output_fi
 
 def download_historical_data() -> None:
     settings = get_settings()
+    if not settings.historical_download_authorized:
+        raise ValueError(
+            "Descarga deshabilitada: verifica permiso de uso de Football-Data para este bot. "
+            "Usa import-history con datos autorizados o configura "
+            "HISTORICAL_DOWNLOAD_AUTHORIZED=true solo si cuentas con autorizacion."
+        )
     settings.raw_dir.mkdir(parents=True, exist_ok=True)
     seasons = training_season_codes(depth=5)
 
     with httpx.Client(follow_redirects=True) as client:
         for season in seasons:
             for league_code, league_name in LEAGUES.items():
+                if league_code == "COL":
+                    continue  # Colombia is local-import only; no verified feed here.
                 output_file = settings.raw_dir / f"{league_name}_{season}.csv"
                 LOGGER.info("Descargando %s %s", league_name, season)
                 try:

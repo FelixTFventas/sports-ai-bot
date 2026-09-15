@@ -11,3 +11,7 @@ data/processed/*.csv
 data/models/*.joblib
 data/predictions/*.csv
 data/reports/*.json
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
